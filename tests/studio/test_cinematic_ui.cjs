@@ -205,6 +205,21 @@ async function testOneClick() {
   assert.equal(x.writes(),writes,'unchanged heartbeat must not reset the DOM');
 }
 
+async function testEarlyUnrealConnectionCommand() {
+  const x=boot({editorReady:false});
+  await x.pause();
+  await x.click('projects');
+  await x.click('browse-unity');
+  assert.match(x.app.innerHTML,/Unreal Editor: <strong>Not connected/);
+  assert.match(x.app.innerHTML,/Copy connection command/);
+  await x.click('copy-worker');
+  assert.match(x.copied(), /B:\/Research\/CutSceneAI\/CutsceneAI\/integrations\/unreal/);
+  assert.match(x.copied(), /import studio_local_editor_worker as w; w.start\(\)/);
+  assert.ok(!x.calls.includes('/api/execute'));
+  assert.ok(!x.calls.includes('/api/prepare'));
+  assert.ok(!x.calls.includes('/api/connect-projects'));
+}
+
 async function testOfflineDoesNotExecute() {
   const x=boot({editorReady:false});
   await x.pause();
@@ -446,9 +461,10 @@ async function testRunningJobShowsResumeInsteadOfDisabledStart() {
   await testPendingFreshStartCannotSilentlySubstituteCensus();
   await testRunningJobShowsResumeInsteadOfDisabledStart();
   await testOneClick();
+  await testEarlyUnrealConnectionCommand();
   await testOfflineDoesNotExecute();
   await testStrictCensusBlockAndExplicitRecovery();
   await testManualCSIRAndCensus();
   await testMissingSelectedCensusFailsClosed();
-  console.log('Cinematic UI backend contract: 13 scenarios including actionable Start Transfer recovery, native errors, responsive selectors and Home-first startup passed.');
+  console.log('Cinematic UI backend contract: 14 scenarios including actionable Start Transfer recovery, native errors, responsive selectors and Home-first startup passed.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

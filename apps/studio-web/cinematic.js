@@ -10,8 +10,9 @@
     discovery:null, folders:{unity:'',unreal:''}, unrealProject:'', csir:'', level:'',
     sourceRights:false, allowPartial:false, candidate:null, job:null, verification:null,
     diagnosis:null, feedback:null, running:false, detailsOpen:false, menuOpen:false,
-    censusOptions:[], censusPath:'', censusSelection:null, censusIssue:false};
+    censusOptions:[], censusPath:'', censusSelection:null, censusIssue:false, editorHelpOpen:false};
   const pathRoot = () => String(state.status?.repo_root||'').replaceAll('\\','/');
+  const workerCommand = () => 'import sys; sys.path.insert(0, '+JSON.stringify(pathRoot()+'/integrations/unreal')+'); import studio_local_editor_worker as w; w.start()';
   const connection = () => state.status?.connection;
   const worker = () => state.status?.unreal_worker || {};
   const readiness = () => state.status?.destination_readiness || {};
@@ -94,6 +95,14 @@
         return '<option value="'+esc(value)+'" '+(value===picked?'selected':'')+'>'+esc(title)+'</option>';
       }).join('')+'</select></label>';
   }
+  function unrealConnectionPanel(project){
+    if(!pathRoot())return '';
+    const w=worker();
+    const same=Boolean(project&&w.connected&&norm(w.project)===norm(project)&&norm(w.checkout_root)===norm(pathRoot()));
+    const label=same?'Connected':w.connected?'Check project / checkout':'Not connected';
+    return '<section class="unreal-connect"><div class="unreal-connect-row"><span>Unreal Editor: <strong>'+label+'</strong></span>'+button('Copy connection command','copy-worker',false,'secondary')+'</div>'+
+      '<p class="subnote">Paste into Unreal’s Python Console.</p><details class="editor-help" '+(state.editorHelpOpen?'open':'')+'><summary>Show command</summary><pre id="worker-command">'+esc(workerCommand())+'</pre></details></section>';
+  }
   function projectForm(){
     const d=state.discovery||{},u=d.unity||{},r=d.unreal||{};
     const cutscenes=u.cutscenes||[],levels=r.levels||[],sources=d.unity_projects||[],
@@ -149,7 +158,8 @@
     return progress()+'<main class="projects-view"><h1>'+(!chosenU?'Select Unity Project':!chosenR?'Select Unreal Project':'Connect Unity &amp; Unreal')+'</h1>'+
       '<form id="project-form"><div class="engine-pair">'+card('unity',chosenU,Boolean(u.folder))+
       (chosenU?line(connected):'')+(chosenU?card('unreal',chosenR,Boolean(r.folder||r.project)):'')+'</div>'+
-      choices+(chosenU?'<div class="permissions"><label><input type="checkbox" name="source-rights" '+
+      (chosenU?unrealConnectionPanel(state.unrealProject||r.project||''):'')+
+      choices+(chosenU&&!cutscenes.length?'<p class="subnote">In Unity, select the Timeline, choose Tools → CutsceneAI → Export for Studio, then Refresh.</p>':'')+(chosenU?'<div class="permissions"><label><input type="checkbox" name="source-rights" '+
       (state.sourceRights?'checked':'')+' /> I have permission to copy source assets</label>'+
       '<label><input type="checkbox" name="allow-partial" '+(state.allowPartial?'checked':'')+
       ' /> Allow partial transfer (not verified)</label>'+
@@ -192,8 +202,7 @@
       phase==='READY_TO_QUEUE'?'Checking target…':
       ['RUNNING','QUEUED'].includes(j.status)?'Transferring…':
       phase==='BLOCKED'?'Transfer blocked':'Checking transfer…';
-    const command='import sys; sys.path.insert(0, r"'+pathRoot()+
-      '/integrations/unreal"); import studio_local_editor_worker as w; w.start()';
+    const command=workerCommand();
     return progress()+'<main class="transfer-view"><div class="engine-pair">'+
       card('unity',connection()?.unity_project||state.folders.unity,true)+line(true)+
       card('unreal',connection()?.target_project||state.folders.unreal,true)+'</div>'+
@@ -574,9 +583,9 @@
       render();return;
     }
     if(name==='copy-worker'){
-      try{await navigator.clipboard.writeText($('#worker-command').textContent);
+      try{await navigator.clipboard.writeText(workerCommand());
         state.info='Unreal Editor companion command copied.';}
-      catch{state.error='Copy the command manually from the box.';}render();return;
+      catch{state.editorHelpOpen=true;state.error='Copy the command manually from the box.';}render();return;
     }
     if(name==='browse-unity'||name==='browse-unreal'){
       state.busy=true;render();
@@ -630,7 +639,7 @@
       finally{state.busy=false;render();}
     }
   });
-  $('#app').addEventListener('toggle',e=>{if(e.target.matches('.research'))state.detailsOpen=e.target.open;},true);
+  $('#app').addEventListener('toggle',e=>{if(e.target.matches('.research'))state.detailsOpen=e.target.open;else if(e.target.matches('.editor-help'))state.editorHelpOpen=e.target.open;},true);
   void restore();
   setInterval(()=>{if(document.visibilityState==='visible')void tick();},2000);
 })();

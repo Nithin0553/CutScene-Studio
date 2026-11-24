@@ -21,7 +21,7 @@ Open http://127.0.0.1:8765.
 
 1. In Unity Package Manager, use **Add package from disk** and choose `integrations/unity/com.cutsceneai.extractor/package.json` in the cloned repository. Let Unity compile.
 2. Open a saved cutscene scene and select its PlayableDirector. In Unity, choose **Tools > CutsceneAI > Export for Studio** (exports the cutscene and its source details together).
-3. Open the intended saved destination level in Unreal. Enable Python Editor Script Plugin and Editor Scripting Utilities if not already enabled; the initial plugin activation may require an editor restart. Choose the project's folder in Studio and copy the connection command shown on the Transfer screen into Unreal's Python Console.
+3. Open the intended saved destination level in Unreal. Enable Python Editor Script Plugin and Editor Scripting Utilities if not already enabled; the initial plugin activation may require an editor restart. Choose the project's folder in Studio and copy the connection command shown on the Projects screen (before connecting projects or starting transfer) into Unreal's Python Console.
 4. Select the Unity and Unreal projects in Studio, choose the cutscene and target level, approve source asset-copy rights, and connect. If multiple matching source records exist, select the one from your latest export. Press **Start Transfer**. Inspect Results and the generated Level Sequence.
 
 The worker stays connected while the editor runs. Use a fresh target and never overwrite an original cutscene. The engine editors are not started or stopped by Studio.

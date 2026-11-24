@@ -92,7 +92,7 @@ Use the correct checkout, workspace, target project and level. If an old module 
 | Native visual result | Screenshot showed dark/black viewport; cause not established. Could be empty/unlit environment, camera/framing, asset setup, or visibility issue. Inspect before changing source-equivalent scene |
 | Benchmark 001 | New native full acceptance not yet verified |
 | Benchmark 002 | New native full acceptance not yet verified |
-| Automated tests | Last code baseline 9245e5b: [CI run 45438957016](https://github.com/Nithin0553/CutScene-Studio/actions/runs/45438957016), Windows and Ubuntu both success |
+| Automated tests | Verified at handoff HEAD 3702f93: [push CI 45452676096](https://github.com/Nithin0553/CutScene-Studio/actions/runs/45452676096) and [PR CI 45452697076](https://github.com/Nithin0553/CutScene-Studio/actions/runs/45452697076) succeeded; push jobs on Windows and Ubuntu passed Python compilation, pytest, JS syntax and UI regression, Ruff and repository hygiene. Last implementation baseline 9245e5b also passed. |
 | Public stable release | Not merged; no declared license; release candidate only |
 
 Known UI limitations: project folder checkmarks/toast are not proof of a live editor connection; transfer screen now reflects actual target editor validity, but project screen still has folder-validation indicators. Multiple valid matching source records require manual selection; auto-select exists only for a single valid match. Source details may include partially captured components (collision/URP/signal behavior not Unreal-verified). Keep those limitations explicit. No blanket partial-transfer override to hide errors.
@@ -114,6 +114,25 @@ Authoritative references: [Benchmark 001](docs/benchmarks/BENCHMARK_001.md), [Be
 4. Improve onboarding: clear distinction between valid folder vs live editor; safely resolve matching source details without manual selection when unambiguous; project-local companion installation/repair with explicit approval, backups and conflict detection. Avoid repeated engine restarts.
 5. Review the draft PR, confirm clean checkout install and current CI, document license/release decision with owner, and merge/tag only after explicit approval and acceptance.
 
+### Resume checkpoint: collect B001 evidence before changing conversion
+
+- On the existing local run, open Studio > Results (or View Previous Transfer Report) > View Report. Capture the sequence name, asset/binding counts, job status, native structure, persistence, CineTwin and visual status. The Results UI deliberately does not equate generation success with fidelity. A screenshot of the report and both engine views at matching timeline positions is useful.
+- Preserve the existing candidate and saved output. In PowerShell, read the active job pointer and corresponding job JSON without changing anything:
+
+```powershell
+$root = Join-Path $HOME '.cutscene-studio\runs'
+$active = Get-Content -Raw (Join-Path $root 'active-job.json') | ConvertFrom-Json
+$job = Get-Content -Raw (Join-Path $root ('jobs\' + $active.job_id + '.json')) | ConvertFrom-Json
+$job | Select-Object job_id,candidate_id,status,generation_status,generated_sequence,sequence_path,assets_imported_count,bindings_created_count,fidelity_verified,visual_audit_status,closed_loop_status,error | Format-List
+Get-ChildItem -LiteralPath (Join-Path $root ('candidates\' + $job.candidate_id)) -File | Select-Object Name,Length
+```
+
+- The active pointer may refer to a newer run: confirm the job and generated sequence match B001 before relying on them. Retain the exact job's receipt, generation readback, hierarchy audit, diagnostic and closed-loop report when available. Missing evidence is not a passing result. Review all local logs, file paths and reports for sensitive information before sharing; never commit them. Do not share `/api/status` output because it contains a local token.
+- In Unreal, inspect the saved destination level in a free Perspective viewport with Sequencer camera lock disabled, frame an existing generated actor, and compare Lit and Unlit view modes. Scrub the same timeline frame with camera lock enabled and compare with Unity. If the actor is visible in Unlit but not Lit, lighting is a candidate cause; if the camera view alone is black, inspect camera binding, transform and cut before altering the environment. Do not add lights, move actors, replace cameras or regenerate the candidate as a first diagnostic step. A different map is a separate test, not evidence for the existing run.
+- Once the scene is saved and the initial evidence is captured, a controlled reopen in a new Unreal process is needed for independent persistence verification; this is an acceptance test, not a recurring connection requirement.
+
+Implementation inspected at 3702f93: `apps/studio-web/cinematic.js` Results and View Report, `tools/studio_local_bridge.py` job/diagnostic/verification endpoints and `integrations/unreal/studio_generation_readback.py`. No implementation change is justified until native evidence identifies the gap. Local working-tree status and native engine results cannot be verified from the GitHub connection alone.
+
 ## 9. Verification commands
 
 ```powershell
@@ -134,6 +153,7 @@ Keep this concise and newest-first. For every change add date, summary, affected
 
 | Date | Change / evidence |
 | --- | --- |
+| 2026-11-24 | Resumed from 3702f93; verified draft PR #1 remains open targeting unchanged main and both push/PR CI passed. Inspected Results/job/readback implementation; documented read-only B001 evidence collection and black-viewport isolation in section 8. Documentation only; no new local or native tests run. Next: owner supplies matching B001 run evidence before conversion changes. |
 | 2026-11-24 | Created living context and AGENTS.md, linked from README, corrected clone command and obsolete contribution instructions. Documentation-only; no engine code changed. |
 | 2026-11-24 | Owner corrected legacy project startup script, verified new Unreal worker and workspace; generated B001 sequence visible in screenshot. Black viewport/full native fidelity remain open. |
 | 2026-11-24 | 9245e5b: exact checkout/workspace, immediate heartbeat, repeated-start diagnostic, target level mismatch display and transfer-screen connection indicators. Windows/Ubuntu CI passed. |

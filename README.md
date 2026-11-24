@@ -4,12 +4,16 @@ A local, deterministic Unity Timeline → Unreal Level Sequence transfer tool.
 
 **Release candidate — native editor validation required.** No AI services, LangGraph, API keys, or cloud calls are required for transfer. This independent repository derives from the original pre-agent Studio and retains selected deterministic integration fixes. Historical benchmark passes are not a certification of this new build.
 
+## Development handoff
+
+Read [context.md](context.md) and [AGENTS.md](AGENTS.md) before continuing development. The context file records current repository state, native evidence, known blockers and next steps; update it with every change.
+
 ## Quick start (Windows)
 
 Install Git, Python 3.11+, a compatible Unity editor with Timeline, and Unreal Engine with Python Editor Script Plugin and Editor Scripting Utilities enabled. Use a backed-up target project.
 
 ```powershell
-git clone https://github.com/Nithin0553/CutScene-Studio.git
+git clone --branch feature/deterministic-studio-v1 https://github.com/Nithin0553/CutScene-Studio.git
 cd CutScene-Studio
 powershell -ExecutionPolicy Bypass -File .\tools\install_studio.ps1
 powershell -ExecutionPolicy Bypass -File .\tools\start_studio.ps1

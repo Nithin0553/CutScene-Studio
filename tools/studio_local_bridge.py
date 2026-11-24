@@ -309,7 +309,7 @@ def prepare(folder: Path = WORKSPACE, options: dict[str, Any] | None = None) -> 
     else:
         # The existing immutable backend supports source-only preparation.
         # CineTwin parity remains unavailable until a real source capture is supplied.
-        for part in ('packages/studio', 'packages/learning', 'packages/cinetwin', 'integrations/unreal'):
+        for part in ('packages/studio', 'packages/cinetwin', 'integrations/unreal'):
             entry = str(ROOT / part)
             if entry not in sys.path:
                 sys.path.insert(0, entry)
@@ -449,7 +449,7 @@ def queue_trial(candidate_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
     if not session_path.is_file():
         raise ValueError('Candidate not found.')
     # Reverify complete immutable evidence at submission time.
-    for p in (ROOT / 'packages/studio', ROOT / 'packages/learning', ROOT / 'packages/cinetwin', ROOT / 'integrations/unreal'):
+    for p in (ROOT / 'packages/studio', ROOT / 'packages/cinetwin', ROOT / 'integrations/unreal'):
         if str(p) not in sys.path:
             sys.path.insert(0, str(p))
     import prepared_transfer

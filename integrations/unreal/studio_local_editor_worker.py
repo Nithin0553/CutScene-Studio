@@ -115,7 +115,7 @@ def _execute(job):
     if receipt.exists() or unreal.load_asset(job['sequence_path']) is not None:
         raise RuntimeError('Target already exists; refusing to overwrite or rerun.')
     # Avoid tools/transfer_readiness.py shadowing packages/cinetwin/transfer_readiness.py.
-    for folder in (ROOT / 'integrations/unreal', ROOT / 'packages/studio', ROOT / 'packages/learning', ROOT / 'packages/cinetwin'):
+    for folder in (ROOT / 'integrations/unreal', ROOT / 'packages/studio', ROOT / 'packages/cinetwin'):
         if str(folder) in sys.path:
             sys.path.remove(str(folder))
         sys.path.insert(0, str(folder))

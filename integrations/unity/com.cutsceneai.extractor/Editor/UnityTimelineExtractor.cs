@@ -13,7 +13,7 @@ namespace CutsceneAI.UnityExtractor
         internal const string ExtractorName = "CutsceneAI.UnityTimelineExtractor";
         internal const string ExtractorVersion = "0.1.2";
 
-        internal static string Export(PlayableDirector director)
+        internal static string Export(PlayableDirector director, bool unique = false)
         {
             if (director == null)
                 throw new ArgumentNullException(nameof(director));
@@ -30,8 +30,17 @@ namespace CutsceneAI.UnityExtractor
 
             var shortId = context.TimelineGuid.Length >= 8 ? context.TimelineGuid[..8] : context.TimelineGuid;
             var fileName = $"{ExtractorUtilities.SafeFileName(timeline.name)}-{shortId}.csir.json";
+            if (unique)
+                fileName = fileName.Replace(".csir.json", "-" + Guid.NewGuid().ToString("N") + ".csir.json");
             var outputPath = Path.Combine(exportDirectory, fileName);
-            File.WriteAllText(outputPath, json);
+            if (unique)
+            {
+                using (var stream = new FileStream(outputPath, FileMode.CreateNew, FileAccess.Write))
+                using (var writer = new StreamWriter(stream))
+                    writer.Write(json);
+            }
+            else
+                File.WriteAllText(outputPath, json);
             return outputPath;
         }
 

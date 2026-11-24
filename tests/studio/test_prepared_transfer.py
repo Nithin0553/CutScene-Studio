@@ -52,6 +52,7 @@ def test_end_to_end_pure_python_handoff_is_immutable_and_verifiable(tmp_path):
     assert prepared["engine_generation_executed"] is False
     assert prepared["asset_import_executed"] is False
     assert prepared["learning_applied"] is False
+    assert not (out / "suggestions.json").exists()
     assert prepared["target_readback_verified"] is False
     assert prepared["behavioral_fidelity_established"] is False
     assert prepared["track_coverage"]["NATIVE_UNVERIFIED"] == 1
@@ -63,7 +64,7 @@ def test_end_to_end_pure_python_handoff_is_immutable_and_verifiable(tmp_path):
 
 
 @pytest.mark.parametrize("filename", [
-    "transfer-plan.json", "coverage-report.json", "evidence.json", "suggestions.json",
+    "transfer-plan.json", "coverage-report.json", "evidence.json",
 ])
 def test_tampered_artifacts_never_verify(tmp_path, filename):
     src, mapping = fixture_files(tmp_path)

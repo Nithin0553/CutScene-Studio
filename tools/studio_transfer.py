@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 for directory in (
-    ROOT / "packages" / "studio", ROOT / "packages" / "learning",
+    ROOT / "packages" / "studio",
     ROOT / "packages" / "cinetwin", ROOT / "integrations" / "unreal",
 ):
     if str(directory) not in sys.path:
@@ -27,7 +27,6 @@ def main(argv: list[str] | None = None) -> int:
     prepare.add_argument("--mapping", type=Path, required=True)
     prepare.add_argument("--capture", type=Path)
     prepare.add_argument("--target-project", type=Path)
-    prepare.add_argument("--case-store", type=Path)
     prepare.add_argument("--strict-ced", action="store_true")
     prepare.add_argument("--asset-manifest", type=Path)
     prepare.add_argument("--asset-receipt", type=Path)
@@ -43,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             record = prepared_transfer.prepare(
                 args.csir, args.mapping, args.out, capture_path=args.capture,
-                target_project=args.target_project, case_store=args.case_store,
+                target_project=args.target_project,
                 strict_ced=args.strict_ced,
                 asset_manifest_path=args.asset_manifest,
                 asset_receipt_path=args.asset_receipt,
@@ -53,7 +52,6 @@ def main(argv: list[str] | None = None) -> int:
         print("[CutSceneAI Studio] Session:", record["session_id"])
         print("[CutSceneAI Studio] Stage:", record["stage"])
         print("[CutSceneAI Studio] Track coverage:", record["track_coverage"])
-        print("[CutSceneAI Studio] Learning proposals only:", record["learning_case_count"])
         print("[CutSceneAI Studio] Target assets and engine untouched.")
         return 0
     except (prepared_transfer.PreparedTransferError, OSError, ValueError,

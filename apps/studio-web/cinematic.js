@@ -127,7 +127,7 @@
           ' · '+esc(state.censusSelection.unresolved_components)+' unresolved source findings, '+
           esc(state.censusSelection.source_snapshot_partial_count||0)+' partially captured components (Unreal fidelity unverified).</p>':
           '<p class="warning">Select matching source details before starting the transfer.</p>')+
-        (!matchingCensuses.length?'<p class="subnote">In Unity, run Discover Installed Feature Surface, then Refresh.</p>':'')+
+        (!matchingCensuses.length?'<p class="subnote">In Unity, select the Timeline and run Export for Studio, then Refresh.</p>':'')+
         (state.censusOptions.length>matchingCensuses.length?
           '<p class="subnote">Unrelated files hidden.</p>':'')+
         '</section>':'')+

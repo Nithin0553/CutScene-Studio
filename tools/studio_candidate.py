@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-for part in ("packages/studio", "packages/learning", "packages/cinetwin", "integrations/unreal"):
+for part in ("packages/studio", "packages/cinetwin", "integrations/unreal"):
     path = ROOT / part
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))

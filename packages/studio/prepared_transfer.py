@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import asset_staging
-import case_memory
 import transfer_backend
 
 VERSION = "0.1.0"
@@ -110,7 +109,6 @@ def prepare(
     *,
     capture_path: str | Path | None = None,
     target_project: str | Path | None = None,
-    case_store: str | Path | None = None,
     strict_ced: bool = False,
     asset_manifest_path: str | Path | None = None,
     asset_receipt_path: str | Path | None = None,
@@ -138,20 +136,7 @@ def prepare(
     if strict_ced and not report["ced_preflight"]["strict_transfer_allowed"]:
         raise PreparedTransferError("CED preflight requires review; strict transfer blocked.")
 
-    cases = case_memory.list_cases(case_store) if case_store is not None else []
-    # Held-out evaluation must not recommend using its own source-project examples.
     fingerprint = str(source.get("source", {}).get("project_fingerprint") or "")
-    proposals = case_memory.suggest(
-        source, cases, exclude_project_fingerprint=fingerprint,
-    )
-    suggestions = {
-        "kind": "cutsceneai.learning.suggestions",
-        "schema_version": VERSION,
-        "auto_applied": False,
-        "fidelity_verified": False,
-        "suggestions": proposals,
-        "exclusion": "same_source_project",
-    }
     source_hash = _sha(source_file)
     mapping_hash = _sha(mapping_file)
     capture_hash = _sha(capture_file) if capture_file is not None else None
@@ -172,7 +157,6 @@ def prepare(
         "transfer-plan.json": plan,
         "coverage-report.json": report,
         "evidence.json": evidence,
-        "suggestions.json": suggestions,
     }
     artifact_hashes = {
         name: hashlib.sha256(_serialize(doc).encode("utf-8")).hexdigest()
@@ -195,7 +179,6 @@ def prepare(
         "stage": "AWAITING_UNREAL_PREFLIGHT",
         "ced_preflight": report["ced_preflight_status"],
         "track_coverage": report["outcomes"],
-        "learning_case_count": len(proposals),
         "asset_import": import_evidence,
         "learning_applied": False,
         "asset_import_executed": False,
@@ -245,11 +228,11 @@ def verify(output_dir: str | Path) -> dict[str, Any]:
             raise PreparedTransferError("Linked asset import provenance changed.")
     for name, expected in session["artifact_sha256"].items():
         if name not in {
-            "transfer-plan.json", "coverage-report.json", "evidence.json", "suggestions.json"
+            "transfer-plan.json", "coverage-report.json", "evidence.json"
         } or _sha(folder / name) != expected:
             raise PreparedTransferError(f"Prepared artifact modified or missing: {name}")
     if set(session["artifact_sha256"]) != {
-        "transfer-plan.json", "coverage-report.json", "evidence.json", "suggestions.json"
+        "transfer-plan.json", "coverage-report.json", "evidence.json"
     }:
         raise PreparedTransferError("Incomplete or unexpected artifact manifest.")
     plan, report, evidence = transfer_backend.compose_files(

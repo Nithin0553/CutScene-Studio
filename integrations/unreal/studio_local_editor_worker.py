@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import hashlib
-import hashlib
+import importlib
 import os
 import sys
 import time
@@ -20,11 +20,16 @@ from pathlib import Path
 import unreal
 
 ROOT = Path(__file__).resolve().parents[2]
+# Fixed at module IMPORT, not recomputed from disk on every heartbeat.
+# A Python interpreter retaining an older worker across a git pull cannot
+# falsely claim that its runtime code matches the new Studio host.
+WORKER_PROTOCOL = 'studio-editor-v0.6'
+WORKER_SOURCE_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 if str(ROOT / 'integrations/unreal') not in sys.path:
     sys.path.insert(0, str(ROOT / 'integrations/unreal'))
 
 HANDLE = None
-WORKSPACE = Path.home() / '.cutsceneai-studio' / 'runs'
+WORKSPACE = Path.home() / '.cutscene-studio' / 'runs'
 LAST_TICK = 0.0
 BUSY = False
 
@@ -96,6 +101,7 @@ def _ensure_target_level(job):
 
 def _execute(job):
     """Only run a preprepared, verifiable, new-sequence job."""
+    job['execution_stage'] = 'VALIDATING_UNREAL_PROJECT_AND_CANDIDATE'
     if job.get('kind') != 'cutsceneai.studio.local_unreal_job' or job.get('schema_version') != '0.1.0':
         raise RuntimeError('Unexpected editor job schema.')
     if os.path.normcase(_loaded_project()) != os.path.normcase(str(Path(job['expected_project']).resolve())):
@@ -120,7 +126,13 @@ def _execute(job):
     # native planning dependency chain before verifying an immutable candidate,
     # so a previously imported 25-action backend cannot falsely compare
     # against a newly prepared 29-action adaptive CED plan.
+    job['execution_stage'] = 'VERIFYING_PREPARED_TRANSFER'
     import studio_planner_sync
+    expected_sync = (ROOT / 'integrations/unreal/studio_planner_sync.py').resolve()
+    if Path(getattr(studio_planner_sync, '__file__', '')).resolve() != expected_sync:
+        raise RuntimeError('Unreal planner sync is loaded from a different checkout. Restart Unreal Editor.')
+    # The sync module itself may have been imported prior to a git pull.
+    importlib.reload(studio_planner_sync)
     studio_planner_sync.synchronize()
     import prepared_transfer
     prepared = prepared_transfer.verify(candidate_dir)
@@ -132,6 +144,21 @@ def _execute(job):
     # or spawning any actor. A missing/circular module must not leave behind
     # a saved but unusable automatic setup.
     import build_level_sequence
+    if job.get('automatic_setup'):
+        # Essential source-content and adapter verification MUST precede
+        # _ensure_target_level, which can create an empty Unreal map.
+        # This path runs before any editor mutation and provides a precise
+        # error when the previously prepared manifest no longer matches.
+        job['execution_stage'] = 'VERIFYING_SOURCE_ASSET_MANIFEST'
+        import studio_auto_assets
+        inspected = studio_auto_assets.verify(
+            job['automatic_setup_manifest'], job['csir'], job['mapping'],
+            str(candidate_dir / 'transfer-plan.json')
+        )
+        if not inspected.get('ready'):
+            raise RuntimeError('Prepared source setup is not ready: ' +
+                               '; '.join(inspected.get('blockers', [])[:8]))
+    job['execution_stage'] = 'PREPARING_DESTINATION_LEVEL'
     _ensure_target_level(job)
     if job.get('automatic_setup'):
         # Source verification runs before ANY editor mutation. If an asset import
@@ -139,6 +166,7 @@ def _execute(job):
         import studio_auto_scene
         setup_receipt = candidate_dir / ('automatic-setup-receipt-' + job['job_id'] + '.json')
         job['setup_status'] = 'IMPORTING_AND_CREATING_SCENE'
+        job['execution_stage'] = 'IMPORTING_ASSETS_AND_CREATING_ACTORS'
         _save(WORKSPACE / 'jobs' / (job['job_id'] + '.json'), job)
         try:
             staged = studio_auto_scene.run(
@@ -159,6 +187,7 @@ def _execute(job):
             raise RuntimeError('Automatic setup not saved; sequence generation blocked.')
     # Last-second check: an actor may have been removed after the UI approved
     # this job. Report a setup state, not a failed engine generation.
+    job['execution_stage'] = 'CHECKING_DESTINATION_READINESS'
     _update_destination_readiness()
     latest = _load(WORKSPACE / 'destination-readiness.json')
     if latest.get('candidate_id') != job['candidate_id'] or not latest.get('ready'):
@@ -167,6 +196,7 @@ def _execute(job):
         job['error'] = 'Destination setup not ready: ' + str(latest.get('next_action', 'Inspect target scene.'))
         job['generation_status'] = 'NOT_STARTED'
         return job
+    job['execution_stage'] = 'GENERATING_EDITABLE_LEVEL_SEQUENCE'
     result = build_level_sequence.build_prepared_files(
         job['csir'], job['mapping'], str(candidate_dir / 'transfer-plan.json'),
         str(candidate_dir / 'coverage-report.json'),
@@ -183,6 +213,7 @@ def _execute(job):
     if job.get('automatic_setup'):
         # The builder may change camera poses, root alignment and attachments
         # after the initial staging save. Persist those scene changes too.
+        job['execution_stage'] = 'SAVING_GENERATED_DESTINATION_LEVEL'
         try:
             import studio_auto_scene
             studio_auto_scene._save_level(unreal, job['expected_level'])
@@ -191,6 +222,11 @@ def _execute(job):
             job['error'] = 'Sequence exists, but the updated level could not be saved: ' + str(save_error)
             job['fidelity_verified'] = False
             return job
+    # Record the real editor OS process that generated this saved sequence.
+    # Independent persistence needs the target reopened in another process;
+    # a Python module reload in this same editor cannot spoof that evidence.
+    job['execution_stage'] = 'POST_GENERATION_AUDITS'
+    job['generation_editor_pid'] = os.getpid()
     job['receipt_file'] = str(receipt)
     _save(WORKSPACE / 'jobs' / (job['job_id'] + '.json'), job)
     cine_report = None
@@ -272,6 +308,26 @@ def _execute(job):
         job['closed_loop_error'] = str(exc)
         unreal.log_warning('[CutSceneAI Studio] Post-transfer assessment incomplete: ' + str(exc))
     job['fidelity_verified'] = False
+    # Read back saved native assets, bindings and hierarchy now, in the
+    # generating editor. Only a separately launched editor may later prove
+    # persistence across process restart.
+    try:
+        _save(WORKSPACE / 'jobs' / (job['job_id'] + '.json'), job)
+        import studio_generation_readback
+        proof = studio_generation_readback.capture(WORKSPACE, job, unreal_api=unreal)
+        job['generation_readback_status'] = proof.get('native_structure', 'INCOMPLETE')
+        job['generation_hierarchy_status'] = proof.get('source_hierarchy', 'INCOMPLETE')
+        errors = [x for x in (proof.get('native_structure_error'),
+                              proof.get('source_hierarchy_error')) if x]
+        if errors:
+            job['generation_readback_errors'] = errors
+            unreal.log_warning('[CutSceneAI Studio] Native readback incomplete: ' +
+                               '; '.join(errors))
+    except Exception as exc:
+        job['generation_readback_status'] = 'INCOMPLETE'
+        job['generation_readback_error'] = str(exc)
+        unreal.log_warning('[CutSceneAI Studio] Generation readback unavailable: ' +
+                           str(exc))
     return job
 
 
@@ -378,7 +434,9 @@ def _tick(_delta):
         WORKSPACE.mkdir(parents=True, exist_ok=True)
         _save(WORKSPACE / 'unreal-worker.json', {
             'heartbeat': _now(), 'project': _loaded_project(),
-            'level': _loaded_level(), 'worker': 'studio-editor-v0.5'
+            'level': _loaded_level(), 'worker': WORKER_PROTOCOL,
+            'checkout_root': str(ROOT.resolve()),
+            'worker_source_sha256': WORKER_SOURCE_SHA256,
         })
         try:
             _update_destination_readiness()
@@ -401,6 +459,7 @@ def _tick(_delta):
                 _save(path, job)
                 job = _execute(job)
             except Exception as exc:
+                job['failure_stage'] = job.get('execution_stage', 'UNKNOWN_NATIVE_STAGE')
                 job['status'] = ('PARTIAL_SETUP_MUST_INSPECT'
                                  if job.get('setup_status') == 'PARTIAL_SETUP_MUST_INSPECT'
                                  else 'BLOCKED_OR_FAILED')

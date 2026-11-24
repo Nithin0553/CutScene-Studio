@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import sys
 from pathlib import Path
 
@@ -85,6 +86,12 @@ def test_optin_activation_creates_one_visual_only_native_track():
     assert report["tracks"][0]["outcome"] == "BAKED_PARTIAL"
     assert report["feature_dispatch"]["full_conversion_verified"] is False
     assert report["feature_dispatch"]["unknown_action_kinds"] == []
+    sections = [row for row in report["feature_dispatch"]["source_occurrences"]
+                if row["kind"] == "sections"]
+    assert len(sections) == 2
+    assert all(row["state"] == "CUSTOM_HANDLER_REGISTERED_UNVERIFIED"
+               and row["matching_plan_action_kinds"] == ["actor_visibility"]
+               and row["behavior_fidelity_verified"] is False for row in sections)
     assert source == before_source
     assert {k: v for k, v in mapping.items()
             if k != "enable_actor_visibility_fallback"} == before_mapping
@@ -96,6 +103,26 @@ def test_optout_activation_does_not_invent_a_native_track():
     assert not any(a["kind"] == "actor_visibility" for a in plan["actions"])
     assert report["tracks"][0]["outcome"] == "SKIPPED"
     assert report["no_full_fidelity_claim"] is True
+
+
+def test_installed_adapter_replans_identically_for_unreal_handoff(tmp_path):
+    source, mapping = sample()
+    mapping["enable_actor_visibility_fallback"] = True
+    source_path = tmp_path / "source.csir.json"
+    mapping_path = tmp_path / "mapping.json"
+    source_path.write_text(json.dumps(source))
+    mapping_path.write_text(json.dumps(mapping))
+    prepared = transfer_backend.compose_files(source_path, mapping_path)
+    recomputed = transfer_backend.compose_files(source_path, mapping_path)
+    submitted = tuple(json.loads(json.dumps(row)) for row in prepared)
+    transfer_backend.verify_prepared_artifacts(*submitted, *recomputed)
+    action = next(row for row in prepared[0]["actions"]
+                  if row["kind"] == "actor_visibility")
+    assert action["source_location"] == "tracks[0]"
+    assert action["covered_source_locations"] == [
+        "tracks[0].sections[0]", "tracks[0].sections[1]"
+    ]
+    assert prepared[1]["no_full_fidelity_claim"] is True
 
 
 @pytest.mark.parametrize("corruption", [
@@ -168,3 +195,51 @@ def test_nonzero_playback_origin_is_not_silently_misrepresented():
     source["timing"]["playback_start"] = rt(3)
     with pytest.raises(visual_activation.VisualActivationError, match="zero playback start"):
         visual_activation.build_action(source, mapping, source["tracks"][0])
+
+
+
+def test_integrated_unity_scope_and_executable_ced_adapter_share_one_planner(
+    tmp_path, monkeypatch,
+):
+    """Integration regression for non-overlapping PR #90 and #92 source gates."""
+    source, mapping = sample()
+    mapping["enable_actor_visibility_fallback"] = True
+    source_file = tmp_path / "source.csir.json"
+    mapping_file = tmp_path / "mapping.json"
+    census_file = tmp_path / "feature-census.json"
+    source_file.write_text(json.dumps(source), encoding="utf-8")
+    census_file.write_text(json.dumps({"kind": "synthetic-test-census"}), encoding="utf-8")
+    mapping["source_feature_surface_path"] = str(census_file)
+    mapping_file.write_text(json.dumps(mapping), encoding="utf-8")
+    state = {
+        "unresolved_component_count": 0,
+        "project_identity_proven": True,
+        "source_scope_matched": True,
+    }
+    observed = []
+    monkeypatch.setattr(transfer_backend.source_surface_gap, "audit_files",
+                        lambda *args: dict(state))
+    def accepted_source_components(csir, mapping, census):
+        observed.append("census_adapt")
+        return {"actions": []}
+    monkeypatch.setattr(transfer_backend.adaptive_components, "adapt",
+                        accepted_source_components)
+
+    plan, report, evidence = transfer_backend.compose_files(source_file, mapping_file)
+    assert observed == ["census_adapt"]
+    assert report["source_feature_surface_state"] == "SOURCE_CENSUS_VERIFIED_NO_UNRESOLVED_COMPONENTS"
+    assert report["feature_dispatch"]["full_conversion_verified"] is False
+    registered = next(action for action in plan["actions"]
+                      if action["kind"] == "actor_visibility")
+    assert registered["source_location"] == "tracks[0]"
+    assert registered["adapter_name"] == "unity_activation_visual_fallback"
+    assert registered["fidelity_status"] == "RENDER_ONLY_PARTIAL_UNVERIFIED"
+    assert evidence["source_feature_surface_sha256"]
+
+    # A partial census cannot be used to smuggle the CED-backed native action
+    # into an ostensibly strict candidate, even with an installed handler.
+    state["source_scope_matched"] = False
+    with pytest.raises(transfer_backend.TransferBackendError,
+                       match="Unity source feature census is incomplete"):
+        transfer_backend.compose_files(source_file, mapping_file)
+    assert observed == ["census_adapt"], "adaptive stage ran despite strict scope rejection"

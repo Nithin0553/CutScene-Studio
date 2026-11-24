@@ -124,6 +124,16 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
             raise AutomaticSetupError('Automatic setup target namespace already exists; choose a fresh candidate: '+manifest['target_folder'])
         if api.EditorAssetLibrary.does_asset_exist(sequence):
             raise AutomaticSetupError('Level Sequence path already occupied: '+sequence)
+        # Resolve all source-backed light classes before importing an asset or
+        # spawning any actor. Unknown types are never mapped to PointLight.
+        light_classes = {'PointLight', 'SpotLight', 'DirectionalLight'}
+        for row in manifest['actors']:
+            if row['kind'] != 'entity.light':
+                continue
+            target_class = row.get('target_light_class') or 'PointLight'
+            if target_class not in light_classes or not hasattr(api, target_class):
+                raise AutomaticSetupError('Required Unreal native light class unavailable: '+
+                                          str(target_class))
         ed=api.get_editor_subsystem(api.EditorActorSubsystem)
         current={}
         for actor in ed.get_all_level_actors():
@@ -210,9 +220,9 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
                 mutation=True
                 actor=ed.spawn_actor_from_object(obj,zero,rotation)
             else:
-                cls={'entity.camera':api.CineCameraActor,
-                     'entity.light':api.PointLight,
-                     'entity.prop':api.Actor}[kind]
+                cls = (getattr(api, row.get('target_light_class') or 'PointLight')
+                       if kind == 'entity.light' else
+                       api.CineCameraActor if kind == 'entity.camera' else api.Actor)
                 operation['status']='SPAWN_STARTED'
                 receipt['failed_step']={'phase':'actor_spawn','name':row['name'],
                                         'label':row['label']}
@@ -226,12 +236,22 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
             operation['status']='ACTOR_LABEL_CHECKED'
             receipt['actors_created'].append({'name':row['name'],'label':row['label'],'kind':kind})
             receipt['failed_step']=None
-        if manifest.get('source_albedo_material_candidates'):
+        actor_materials = manifest.get('source_albedo_actor_candidates')
+        if actor_materials is not None and not isinstance(actor_materials, dict):
+            raise AutomaticSetupError('Invalid actor-scoped source material manifest.')
+        if (actor_materials or manifest.get('source_albedo_material_candidates')):
             material_cache = {}
-            # This is a *partial* albedo-only recovery and never implies a
-            # source-equivalent shader. Only fresh imported actors are used.
+            # Only the source renderer's exact .mat path may supply an actor's
+            # slot. A global match on "Body" could give one actor the wrong
+            # texture or discard both actors as ambiguous. Old manifests without
+            # this field retain their conservative global matching behavior.
             for row in manifest['actors']:
                 if row['kind'] not in ('entity.character', 'entity.prop'):
+                    continue
+                candidates = (actor_materials.get(row['name'], [])
+                              if actor_materials is not None
+                              else manifest['source_albedo_material_candidates'])
+                if not candidates:
                     continue
                 created = next((a for a in ed.get_all_level_actors()
                                 if str(a.get_actor_label()) == row['label']), None)
@@ -240,8 +260,7 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
                 receipt['failed_step']={'phase':'material_restoration','name':row['name']}
                 receipt['material_restoration'].extend(
                     dict(item, actor=row['name']) for item in studio_material_restore.restore(
-                        api, created, manifest['source_albedo_material_candidates'],
-                        existing_assets=material_cache)
+                        api, created, candidates, existing_assets=material_cache)
                 )
                 receipt['failed_step']=None
         receipt['failed_step']={'phase':'level_save','level':expected_level}

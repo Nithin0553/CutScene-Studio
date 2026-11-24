@@ -305,7 +305,7 @@ def audit(job_path: str | Path, output_path: str | Path, *, unreal_api: Any = No
 
 def audit_latest(workspace: str | Path | None = None, *, unreal_api: Any = None) -> dict[str, Any]:
     root = Path(workspace).resolve() if workspace is not None else (
-        Path.home() / ".cutsceneai-studio" / "runs"
+        Path.home() / ".cutscene-studio" / "runs"
     )
     pointer = _load(root / "active-job.json")
     job_id = str(pointer["job_id"])

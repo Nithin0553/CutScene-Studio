@@ -99,7 +99,7 @@ def test_duplicate_target_asset_paths_does_not_guess(tmp_path):
     assert any('unique Unity asset' in x for x in result['blockers'])
 
 
-def test_broad_unity_scope_skips_unrelated_invalid_tutorial_png(tmp_path):
+def test_broad_unity_scope_ignores_unrelated_tutorial_png(tmp_path):
     """Reproduces user report: Assets/TutorialInfo/Icons/URP.png isn't PNG."""
     root, files = create(tmp_path)
     tutorial = root / 'Assets' / 'TutorialInfo' / 'Icons'
@@ -107,16 +107,34 @@ def test_broad_unity_scope_skips_unrelated_invalid_tutorial_png(tmp_path):
     (tutorial / 'URP.png').write_bytes(b'not-a-png-tutorial-placeholder')
     valid = root / 'Assets' / 'Benchmark002' / 'Characters' / 'Albedo.png'
     valid.write_bytes(b'\x89PNG\r\n\x1a\n' + b'valid-texture-placeholder')
+    csir = json.loads(files[0].read_text())
+    csir['entities'][0]['metadata'] = {'source_material_assets': [
+        {'albedo_texture_asset_path': valid.relative_to(root).as_posix()}]}
+    files[0].write_text(json.dumps(csir))
     result = auto.inspect(*files, root, 'Assets', '/Game/CutSceneAI/AutoTransfer/T_ABCD')
     assert result['ready'] is True
     assert not result['blockers']
-    assert any('URP.png' in warning and 'Skipped' in warning for warning in result['warnings'])
+    assert not any('URP.png' in warning for warning in result['warnings'])
     assert any(row['kind'] == 'Texture2D' and row['source_file'] == str(valid.resolve())
                for row in result['imports'])
     assert not any('URP.png' in row['source_file'] for row in result['imports'])
     report = tmp_path / 'auto.json'
     report.write_text(json.dumps(result))
     assert auto.verify(report, *files) == result
+
+
+def test_referenced_invalid_png_is_reported_without_importing_it(tmp_path):
+    root, files = create(tmp_path)
+    texture = root / 'Assets' / 'Benchmark002' / 'Characters' / 'Bad.png'
+    texture.write_bytes(b'not a PNG')
+    csir = json.loads(files[0].read_text())
+    csir['entities'][0]['metadata'] = {'source_material_assets': [
+        {'albedo_texture_asset_path': texture.relative_to(root).as_posix()}]}
+    files[0].write_text(json.dumps(csir))
+    result = auto.inspect(*files, root, 'Assets', '/Game/CutSceneAI/AutoTransfer/T_ABCD')
+    assert result['ready']
+    assert any('Bad.png' in message and 'Skipped' in message for message in result['warnings'])
+    assert not any(row['source_file'] == str(texture) for row in result['imports'])
 
 
 def test_bad_required_audio_remains_a_blocker(tmp_path):
@@ -165,6 +183,72 @@ def test_source_project_path_disambiguates_different_character_fbx(tmp_path):
     assert next(x for x in result['asset_resolutions'] if x['source']=='Ch31_nonPBR')['strategy'] == 'UNITY_ASSET_PATH'
 
 
+def test_renderer_identity_finds_renamed_model_outside_selected_scope(tmp_path):
+    root, files = create(tmp_path)
+    model = root / 'Assets' / 'SharedModels' / 'GuardMesh.fbx'
+    model.parent.mkdir()
+    model.write_bytes(b'rendered-guard')
+    guid = 'aabbccddeeff00112233445566778899'
+    model.with_name(model.name + '.meta').write_text('guid: ' + guid + '\n')
+    csir = json.loads(files[0].read_text())
+    csir['entities'][0]['name'] = 'CHARACTER_Guard'
+    csir['entities'][0]['metadata'] = {'source_model_assets': [
+        {'asset_path': 'Assets/SharedModels/GuardMesh.fbx', 'guid': guid,
+         'renderer_path': 'Scene/Guard/Body', 'mesh_name': 'Body'}]}
+    files[0].write_text(json.dumps(csir))
+    plan = json.loads(files[2].read_text())
+    plan['bindings']['CHARACTER_Guard'] = plan['bindings'].pop('Ch31_nonPBR')
+    for action in plan['actions']:
+        if action.get('entity_name') == 'Ch31_nonPBR':
+            action['entity_name'] = 'CHARACTER_Guard'
+    files[2].write_text(json.dumps(plan))
+    result = auto.inspect(*files, root, 'Assets/Benchmark002', '/Game/CutSceneAI/AutoTransfer/T_GUARD')
+    resolution = next(row for row in result['asset_resolutions']
+                      if row['source'] == 'CHARACTER_Guard' and row['kind'] == 'character')
+    assert result['ready']
+    assert resolution['strategy'] == 'UNITY_ASSET_PATH'
+    assert resolution['candidates'] == [str(model.resolve())]
+    assert any(row['source_file'] == str(model.resolve()) and row['kind'] == 'SkeletalMesh'
+               for row in result['imports'])
+
+
+def test_stale_renderer_guid_blocks_before_native_import(tmp_path):
+    root, files = create(tmp_path)
+    model = root / 'Assets' / 'SharedModels' / 'GuardMesh.fbx'
+    model.parent.mkdir()
+    model.write_bytes(b'rendered-guard')
+    model.with_name(model.name + '.meta').write_text('guid: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n')
+    csir = json.loads(files[0].read_text())
+    csir['entities'][0]['metadata'] = {'source_model_assets': [
+        {'asset_path': 'Assets/SharedModels/GuardMesh.fbx',
+         'guid': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}]}
+    files[0].write_text(json.dumps(csir))
+    result = auto.inspect(*files, root, 'Assets/Benchmark002', '/Game/CutSceneAI/AutoTransfer/T_GUARD')
+    assert not result['ready']
+    assert any('IDENTITY_CONFLICT' in row for row in result['blockers'])
+
+
+def test_new_export_without_rendered_model_does_not_guess_same_named_fbx(tmp_path):
+    root, files = create(tmp_path)
+    csir = json.loads(files[0].read_text())
+    csir['entities'][0]['metadata'] = {'source_model_assets': []}
+    files[0].write_text(json.dumps(csir))
+    result = auto.inspect(*files, root, 'Assets/Benchmark002', '/Game/CutSceneAI/AutoTransfer/T_NO_MESH')
+    assert not result['ready']
+    assert any('NO_RENDERED_MODEL_ASSET_REFERENCE' in row for row in result['blockers'])
+
+
+def test_duplicate_source_names_cannot_silently_select_one_actor(tmp_path):
+    root, files = create(tmp_path)
+    csir = json.loads(files[0].read_text())
+    csir['entities'].append({'entity_id': 'different', 'name': 'Ch31_nonPBR',
+                             'ced_type': 'entity.character'})
+    files[0].write_text(json.dumps(csir))
+    result = auto.inspect(*files, root, 'Assets/Benchmark002', '/Game/CutSceneAI/AutoTransfer/T_DUP')
+    assert not result['ready']
+    assert any('Duplicate source entity name' in row for row in result['blockers'])
+
+
 def test_prop_fbx_imported_as_static_mesh_and_bound_to_actor(tmp_path):
     root, files = create(tmp_path)
     prop = root/'Assets'/'Benchmark002'/'Characters'/'PROP_MOVING.fbx'
@@ -206,6 +290,11 @@ def test_identical_png_duplicates_are_deduplicated_without_blocking(tmp_path):
     two = nested / 'Ch26_1001_Diffuse.png'
     one.write_bytes(raw)
     two.write_bytes(raw)
+    csir = json.loads(files[0].read_text())
+    csir['entities'][0]['metadata'] = {'source_material_assets': [
+        {'albedo_texture_asset_path': p.relative_to(root).as_posix()}
+        for p in (one, two)]}
+    files[0].write_text(json.dumps(csir))
     result = auto.inspect(*files, root, 'Assets/Benchmark002',
                           '/Game/CutSceneAI/AutoTransfer/T_ABCD')
     assert result['ready']
@@ -226,6 +315,11 @@ def test_duplicate_texture_drift_invalidates_prepared_manifest(tmp_path):
     first.parent.mkdir();second.parent.mkdir()
     valid=b'\x89PNG\r\n\x1a\n'+b'common-texture'
     first.write_bytes(valid);second.write_bytes(valid)
+    csir = json.loads(files[0].read_text())
+    csir['entities'][0]['metadata'] = {'source_material_assets': [
+        {'albedo_texture_asset_path': p.relative_to(root).as_posix()}
+        for p in (first, second)]}
+    files[0].write_text(json.dumps(csir))
     result=auto.inspect(*files,root,'Assets','/Game/CutSceneAI/AutoTransfer/T_ABCD')
     assert result['ready']
     manifest=tmp_path/'manifest.json';manifest.write_text(json.dumps(result))
@@ -244,3 +338,84 @@ def test_mp3_is_planned_directly_as_soundwave(tmp_path):
     assert any(x['kind']=='SoundWave' and x['source_file']==str(sound.resolve())
                for x in result['imports'])
     assert not any('FFmpeg' in warning for warning in result['warnings'])
+
+
+
+def test_manifest_pins_source_asset_inspector_modules(tmp_path):
+    root, files = create(tmp_path)
+    ready = auto.inspect(*files, root, "Assets/Benchmark002",
+                         "/Game/CutSceneAI/AutoTransfer/T_ABCD")
+    assert ready["ready"]
+    for key in ("inspector_code_sha256", "identity_adapter_sha256",
+                "material_adapter_sha256"):
+        assert len(ready[key]) == 64
+        assert all(char in "0123456789abcdef" for char in ready[key])
+    target = tmp_path / "manifest.json"
+    target.write_text(json.dumps(ready))
+    assert auto.verify(target, *files) == ready
+
+
+def test_manifest_reports_which_safe_source_changed(tmp_path):
+    root, files = create(tmp_path)
+    original = auto.inspect(*files, root, "Assets/Benchmark002",
+                            "/Game/CutSceneAI/AutoTransfer/T_ABCD")
+    target = tmp_path / "manifest.json"
+    target.write_text(json.dumps(original))
+    (root / "Assets/Benchmark002/Animations/Walking.fbx").write_bytes(
+        b"original-animation-file-was-modified"
+    )
+    with pytest.raises(auto.AutoAssetError,
+                       match="Source asset contents changed.*never overwrite"):
+        auto.verify(target, *files)
+
+
+def test_manifest_reports_stale_source_adapter_without_bypassing_guard(tmp_path):
+    root, files = create(tmp_path)
+    original = auto.inspect(*files, root, "Assets/Benchmark002",
+                            "/Game/CutSceneAI/AutoTransfer/T_ABCD")
+    target = tmp_path / "manifest.json"
+    corrupted = dict(original, inspector_code_sha256="f" * 64)
+    target.write_text(json.dumps(corrupted))
+    with pytest.raises(auto.AutoAssetError,
+                       match="automatic asset inspector code changed"):
+        auto.verify(target, *files)
+    assert json.loads(target.read_text()) == corrupted, "immutable manifest overwritten"
+
+
+def test_manifest_identifies_unrelated_code_or_source_planning_drift(tmp_path):
+    root, files = create(tmp_path)
+    original = auto.inspect(*files, root, "Assets/Benchmark002",
+                            "/Game/CutSceneAI/AutoTransfer/T_ABCD")
+    target = tmp_path / "manifest.json"
+    stale = dict(original, actors=[{"name": "old-world-light",
+                                   "kind": "entity.light",
+                                   "label": "CSAI_OldLight"}])
+    target.write_text(json.dumps(stale))
+    with pytest.raises(auto.AutoAssetError, match="planning changed at actors"):
+        auto.verify(target, *files)
+
+
+def test_manifest_accepts_same_assets_across_fresh_python_process(tmp_path):
+    import subprocess
+
+    root, files = create(tmp_path)
+    original = auto.inspect(*files, root, "Assets/Benchmark002",
+                            "/Game/CutSceneAI/AutoTransfer/T_ABCD")
+    target = tmp_path / "manifest.json"
+    target.write_text(json.dumps(original))
+    code = """
+import sys
+from pathlib import Path
+sys.path.insert(0, {tools!r})
+import studio_auto_assets
+studio_auto_assets.verify({manifest!r}, {csir!r}, {mapping!r}, {plan!r})
+print('MATCHED')
+""".format(
+        tools=str(Path(__file__).resolve().parents[2] / "tools"),
+        manifest=str(target), csir=str(files[0]), mapping=str(files[1]),
+        plan=str(files[2]),
+    )
+    result = subprocess.run([sys.executable, "-c", code],
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "MATCHED" in result.stdout

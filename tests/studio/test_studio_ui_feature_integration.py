@@ -56,6 +56,11 @@ def _source_census(tmp_path):
         "loaded_scene_components": [{
             "scene_path": "Assets/Benchmark002.unity",
             "object_path": "Root/CAM_A",
+            "component_type": "UnityEngine.Transform",
+            "component_global_id": "transform-a-1",
+        }, {
+            "scene_path": "Assets/Benchmark002.unity",
+            "object_path": "Root/CAM_A",
             "component_type": "UnityEngine.Camera",
             "component_global_id": "camera-a-1",
         }],
@@ -126,6 +131,32 @@ def test_incomplete_census_may_be_reviewed_but_not_strictly_misrepresented(tmp_p
         "require_complete_source_features": False,
     })
     assert allowed["require_complete_source_features"] is False
+
+
+def test_missing_cutscene_object_is_visible_and_blocks_even_best_effort(tmp_path):
+    config, census = _source_census(tmp_path)
+    source_path = Path(config["csir"])
+    source = json.loads(source_path.read_text())
+    extra = dict(source["entities"][0])
+    extra["entity_id"] = "missing-object"
+    extra["name"] = "CAM_B"
+    extra["metadata"] = {
+        "scene_path": "Assets/Benchmark002.unity", "hierarchy_path": "Root/CAM_B",
+    }
+    source["entities"].append(extra)
+    source_path.write_text(json.dumps(source))
+    option = feat.source_surfaces(config)["options"][0]
+    assert option["source_scope_matched"] is False
+    assert option["unresolved_findings"] == [{
+        "native_type": "UnityEngine.Transform", "object_path": "Root/CAM_B",
+        "scene_path": "Assets/Benchmark002.unity",
+        "state": "SOURCE_OBJECT_TRANSFORM_NOT_VERIFIED",
+    }]
+    with pytest.raises(ValueError, match="scene scope does not match"):
+        feat.validate_options(config, {
+            "source_feature_surface_path": str(census),
+            "require_complete_source_features": False,
+        })
 
 
 def test_capture_candidate_ui_options_apply_only_to_unique_mapping_copy(tmp_path, monkeypatch):
@@ -246,3 +277,119 @@ def test_source_ui_static_wiring_and_benchmark_guidance():
                  "unresolved_findings", "exact source objects",
                  "Best-effort mode selected", "Strict mode will block"):
         assert part in app
+
+
+
+def test_known_captured_urp_component_is_source_accounted_but_still_unverified(tmp_path):
+    config, census_file = _source_census(tmp_path)
+    data = json.loads(census_file.read_text())
+    data["loaded_scene_components"].append({
+        "scene_path": "Assets/Benchmark002.unity", "object_path": "Root/CAM_A",
+        "component_type":
+            "UnityEngine.Rendering.Universal.UniversalAdditionalCameraData",
+        "component_global_id": "urp-extra-camera-1",
+        "feature": {
+            "extraction": "URP_CAMERA_PROPERTIES_PARTIAL",
+            "native_properties_truncated": False,
+            "has_render_post_processing": True, "render_post_processing": True,
+            "native_properties": [],
+        },
+    })
+    census_file.write_text(json.dumps(data))
+    option = feat.source_surfaces(config)["options"][0]
+    assert option["source_snapshot_partial_count"] == 1
+    assert option["unresolved_components"] == 0
+    assert option["strict_ready"] is True
+    assert option["source_snapshot_partial_findings"][0]["native_type"].endswith(
+        "UniversalAdditionalCameraData"
+    )
+    assert feat.validate_options(config, {
+        "source_feature_surface_path": str(census_file),
+        "require_complete_source_features": True,
+    })["require_complete_source_features"] is True
+
+    # An exporter that omitted the actual camera evidence is still blocked.
+    data["loaded_scene_components"][-1]["feature"] = {
+        "extraction": "URP_CAMERA_PROPERTIES_PARTIAL",
+        "native_properties_truncated": False,
+        "native_properties": [],
+    }
+    census_file.write_text(json.dumps(data))
+    option = feat.source_surfaces(config)["options"][0]
+    assert option["unresolved_components"] == 1
+    assert option["source_snapshot_partial_count"] == 0
+    assert option["strict_ready"] is False
+    with pytest.raises(ValueError, match="Strict source census"):
+        feat.validate_options(config, {
+            "source_feature_surface_path": str(census_file),
+            "require_complete_source_features": True,
+        })
+
+
+
+def test_ui_shows_generation_readback_without_fake_editor_restart(tmp_path):
+    workspace = tmp_path / "runs"
+    job_id = "a" * 32
+    candidate = workspace / "candidates" / "candidateA"
+    candidate.mkdir(parents=True)
+    (candidate / ("generation-readback-audit-" + job_id + ".json")).write_text(
+        json.dumps({
+            "kind": "cutsceneai.studio.persistence_audit",
+            "status": "STRUCTURAL_READBACK_PASS_RESTART_UNVERIFIED",
+            "native_structure_status": "PASS",
+            "assets_class_and_disk_verified": 11, "asset_count": 11,
+            "actors_unique_and_class_verified": 10, "actor_count": 10,
+            "restart_verified": False,
+        })
+    )
+    result = feat.verification(workspace, {"job_id": job_id},
+                               {"job_id": job_id, "candidate_dir": str(candidate)})
+    assert result["persistence"]["native_structure"] == "PASS"
+    assert result["persistence"]["readback_phase"] == "GENERATION_EDITOR"
+    assert result["persistence"]["restart_verified"] is False
+    assert result["fidelity_verified"] is False
+
+    # Once a real post-reopen audit exists, it takes priority over first-pass
+    # generation readback and can prove a distinct editor process.
+    (candidate / ("post-reopen-audit-" + job_id + ".json")).write_text(
+        json.dumps({
+            "kind": "cutsceneai.studio.persistence_audit",
+            "status": "STRUCTURAL_READBACK_PASS_DIFFERENT_EDITOR_PROCESS",
+            "native_structure_status": "PASS",
+            "restart_verified": True,
+        })
+    )
+    verified = feat.verification(workspace, {"job_id": job_id},
+                                 {"job_id": job_id, "candidate_dir": str(candidate)})
+    assert verified["persistence"]["readback_phase"] == "POST_REOPEN"
+    assert verified["persistence"]["restart_verified"] is True
+    assert verified["fidelity_verified"] is False
+
+
+
+def test_two_matching_censuses_accept_exact_user_choice_and_reject_stale_csir(tmp_path):
+    config, original = _source_census(tmp_path)
+    alternate = original.with_name("feature-surface-unity-alternate.json")
+    alternate.write_bytes(original.read_bytes())
+    options = feat.source_surfaces(config)["options"]
+    assert {entry["path"] for entry in options} == {str(original), str(alternate)}
+
+    # The backend must retain whichever approved file the UI explicitly picked.
+    for selected in (original, alternate):
+        result = feat.validate_options(config, {
+            "source_feature_surface_path": str(selected),
+            "require_complete_source_features": True,
+        })
+        assert result["source_feature_surface_path"] == str(selected)
+
+    # After the Unity source changes, an older census cannot be silently
+    # used against a CSIR from another project.
+    csir = Path(config["csir"])
+    source = json.loads(csir.read_text())
+    source["source"]["project_fingerprint"] = "different-project"
+    csir.write_text(json.dumps(source))
+    with pytest.raises(ValueError, match="source|identity|project|cutscene"):
+        feat.validate_options(config, {
+            "source_feature_surface_path": str(original),
+            "require_complete_source_features": True,
+        })

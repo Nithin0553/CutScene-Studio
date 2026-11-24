@@ -491,3 +491,170 @@ def test_source_only_studio_candidate_uses_hierarchy_enabled_mapping_copy(tmp_pa
     assert observed["hierarchy"] is True
     assert result["engine_generation_executed"] is False
     assert Path(config["mapping"]).read_bytes() == original
+
+
+
+def test_failed_job_exposes_native_stage_and_exact_safe_setup_receipt(tmp_path):
+    work = tmp_path / "work"
+    candidate = work / "candidates" / "candidate_001"
+    candidate.mkdir(parents=True)
+    job_id = "d" * 32
+    receipt = candidate / ("automatic-setup-receipt-" + job_id + ".json")
+    receipt.write_text(json.dumps({
+        "kind": "cutsceneai.studio.automatic_setup_receipt",
+        "status": "PARTIAL_SETUP_MUST_INSPECT",
+        "failed_step": {"phase": "asset_import", "path": "/Game/Studio/CharacterA"},
+        "recovery": "Do not rerun; inspect imported assets.",
+        "error": {"type": "AutomaticSetupError", "message": "FBX import failed"},
+    }))
+    job = {
+        "job_id": job_id, "candidate_id": "candidate_001",
+        "candidate_dir": str(candidate), "created_at": "2026-11-09T17:00:00Z",
+        "status": "PARTIAL_SETUP_MUST_INSPECT",
+        "generation_status": "NOT_STARTED",
+        "failure_stage": "IMPORTING_ASSETS_AND_CREATING_ACTORS",
+        "error": "FBX import failed",
+        "setup_receipt_file": str(receipt),
+        "setup_status": "PARTIAL_SETUP_MUST_INSPECT",
+    }
+    bridge.atomic_json(work / "jobs" / (job_id + ".json"), job)
+    result = bridge.job_status(job_id, work)
+    assert result["error"] == "FBX import failed"
+    assert result["failure_stage"] == "IMPORTING_ASSETS_AND_CREATING_ACTORS"
+    assert result["created_at"] == "2026-11-09T17:00:00Z"
+    assert result["candidate_id"] == "candidate_001"
+    assert result["setup_failed_step"]["phase"] == "asset_import"
+    assert result["setup_recovery"].startswith("Do not rerun")
+    assert result["setup_error"] == "FBX import failed"
+    assert "traceback" not in result
+
+    # A forged receipt path cannot read arbitrary files outside the candidate.
+    external = tmp_path / "outside.json"
+    external.write_text(receipt.read_text())
+    job["setup_receipt_file"] = str(external)
+    bridge.atomic_json(work / "jobs" / (job_id + ".json"), job)
+    blocked = bridge.job_status(job_id, work)
+    assert blocked["error"] == "FBX import failed"
+    assert "setup_failed_step" not in blocked
+    assert "setup_recovery" not in blocked
+
+
+def test_old_failed_job_keeps_original_error_without_new_stage(tmp_path):
+    work = tmp_path / "work"
+    job_id = "e" * 32
+    bridge.atomic_json(work / "jobs" / (job_id + ".json"), {
+        "job_id": job_id,
+        "status": "BLOCKED_OR_FAILED",
+        "generation_status": "NOT_STARTED",
+        "error": "Target already exists; refusing to overwrite or rerun.",
+    })
+    report = bridge.job_status(job_id, work)
+    assert report["error"].startswith("Target already exists")
+    assert report["failure_stage"] is None
+    assert "setup_failed_step" not in report
+
+
+
+def _current_editor_heartbeat(config):
+    import hashlib
+    from datetime import UTC, datetime
+
+    worker_file = (bridge.ROOT / 'integrations/unreal' /
+                   'studio_local_editor_worker.py')
+    return {
+        'heartbeat': datetime.now(UTC).isoformat(),
+        'project': config['target_project'],
+        'level': config['level_path'],
+        'worker': bridge.REQUIRED_WORKER_PROTOCOL,
+        'checkout_root': str(bridge.ROOT.resolve()),
+        'worker_source_sha256': hashlib.sha256(worker_file.read_bytes()).hexdigest(),
+    }
+
+
+def test_unreal_companion_handshake_rejects_old_cached_or_foreign_worker(tmp_path):
+    config = fixture_files(tmp_path)
+    good = _current_editor_heartbeat(config)
+    result = bridge.worker_code_mismatch({
+        'worker_version': good['worker'],
+        'checkout_root': good['checkout_root'],
+        'worker_source_sha256': good['worker_source_sha256'],
+    })
+    assert result is None
+    for changed, expected in [
+        ({'worker_version': 'studio-editor-v0.5'}, 'requires'),
+        ({'worker_source_sha256': '0' * 64}, 'cached an outdated'),
+        ({'checkout_root': str(tmp_path / 'OtherCheckout')}, 'different'),
+        ({'worker_source_sha256': None}, 'cached an outdated'),
+        ({'checkout_root': None}, 'valid'),
+        ({'checkout_root': '.'}, 'absolute'),
+    ]:
+        worker = {
+            'worker_version': good['worker'],
+            'checkout_root': good['checkout_root'],
+            'worker_source_sha256': good['worker_source_sha256'],
+        }
+        worker.update(changed)
+        assert expected in bridge.worker_code_mismatch(worker)
+
+
+def test_destination_readiness_blocks_older_editor_for_source_studio(tmp_path):
+    config = fixture_files(tmp_path)
+    config = bridge.config_check(config)
+    # A source-project Studio connection is subject to the stronger
+    # module-origin handshake; target-only legacy trials are unaffected.
+    config['unity_project'] = str(tmp_path / 'Unity')
+    work = tmp_path / 'runs'
+    bridge.atomic_json(work / 'connection.json', config)
+    bridge.atomic_json(work / 'active-candidate.json', {
+        'candidate_id': 'candidate_new', 'sequence_path': '/Game/Fresh',
+    })
+    old = _current_editor_heartbeat(config)
+    old['worker'] = 'studio-editor-v0.5'
+    bridge.atomic_json(work / 'unreal-worker.json', old)
+    report = bridge.destination_readiness(work)
+    assert report['status'] == 'UPGRADE_COMPANION'
+    assert report['ready'] is False
+    assert 'completely close Unreal Editor' in report['next_action']
+    assert 'new transfer candidate' in report['next_action']
+    current = _current_editor_heartbeat(config)
+    bridge.atomic_json(work / 'unreal-worker.json', current)
+    followup = bridge.destination_readiness(work)
+    assert followup['status'] != 'UPGRADE_COMPANION'
+
+
+def test_queue_refuses_stale_worker_before_job_or_asset_mutation(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    cfg = bridge.config_check(fixture_files(tmp_path))
+    cfg['unity_project'] = str(tmp_path / 'Unity')
+    work = tmp_path / 'runs'
+    bridge.atomic_json(work / 'connection.json', cfg)
+    candidate = 'candidate_no_stale_worker'
+    path = work / 'candidates' / candidate
+    path.mkdir(parents=True)
+    (path / 'session.json').write_text('{}')
+    session = {
+        'source': {'csir_path': cfg['csir']},
+        'source_capture': {'path': cfg['capture']},
+        'target': {'mapping_path': cfg['mapping'],
+                   'sequence_asset_path': '/Game/CutSceneAI/New'},
+    }
+    monkeypatch.setitem(sys.modules, 'prepared_transfer',
+                        SimpleNamespace(verify=lambda _: session))
+    monkeypatch.setattr(bridge, 'config_check', lambda current: current)
+    heartbeat = _current_editor_heartbeat(cfg)
+    heartbeat['worker'] = 'studio-editor-v0.5'
+    bridge.atomic_json(work / 'unreal-worker.json', heartbeat)
+    with pytest.raises(ValueError, match='Unreal companion update required'):
+        bridge.queue_trial(candidate, work)
+    assert not (work / 'jobs').exists() or not list((work / 'jobs').glob('*.json'))
+    assert not (work / 'active-job.json').exists()
+
+    # A new-protocol worker that reports an old imported code hash also blocks.
+    heartbeat['worker'] = bridge.REQUIRED_WORKER_PROTOCOL
+    heartbeat['worker_source_sha256'] = 'f' * 64
+    bridge.atomic_json(work / 'unreal-worker.json', heartbeat)
+    with pytest.raises(ValueError, match='cached an outdated Python worker'):
+        bridge.queue_trial(candidate, work)
+    assert not (work / 'active-job.json').exists()

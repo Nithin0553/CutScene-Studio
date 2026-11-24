@@ -80,6 +80,9 @@ def source_surfaces(config: dict[str, Any]) -> dict[str, Any]:
                 "NATIVE_COMPONENT_EXTRACTION_OR_ADAPTER_REQUIRED",
                 "MISSING_SOURCE_SCRIPT",
                 "DUPLICATE_SOURCE_COMPONENT_IDENTITY",
+                "DUPLICATE_SOURCE_ENTITY_PATH",
+                "SOURCE_OBJECT_IDENTITY_MISMATCH",
+                "SOURCE_OBJECT_IDENTITY_UNVERIFIED",
             }
             findings = [
                 {
@@ -91,10 +94,28 @@ def source_surfaces(config: dict[str, Any]) -> dict[str, Any]:
                 for row in report["component_findings"]
                 if row["state"] in unresolved_states
             ]
-            if not report["source_scope_matched"]:
+            # The Unity scanner already records conservative authoring
+            # snapshots for some native features. Those are source-accounted,
+            # but still require target adapters and behavioral verification.
+            partial_findings = [
+                {
+                    "native_type": row["native_component"],
+                    "object_path": row["hierarchy_path"],
+                    "scene_path": row["scene_path"],
+                    "state": row["state"],
+                }
+                for row in report["source_snapshot_partial_findings"]
+            ]
+            findings.extend({
+                "native_type": "UnityEngine.Transform",
+                "object_path": row["hierarchy_path"],
+                "scene_path": row["scene_path"],
+                "state": row["state"],
+            } for row in report["missing_cutscene_objects"])
+            if not report["source_scope_matched"] and not report["missing_cutscene_objects"]:
                 findings.append({
                     "native_type": "SOURCE_SCOPE_NOT_VERIFIED",
-                    "object_path": "(no matching source scene objects)",
+                    "object_path": "(no source scene objects identified)",
                     "scene_path": "",
                     "state": "SOURCE_SCOPE_NOT_VERIFIED",
                 })
@@ -105,6 +126,8 @@ def source_surfaces(config: dict[str, Any]) -> dict[str, Any]:
                 "strict_ready": ready,
                 "unresolved_components": report["unresolved_component_count"],
                 "unresolved_findings": findings[:100],
+                "source_snapshot_partial_count": report["source_snapshot_partial_count"],
+                "source_snapshot_partial_findings": partial_findings[:100],
                 "findings_truncated": len(findings) > 100,
                 "scoped_components": report["scoped_component_occurrences"],
                 "project_identity_proven": report["project_identity_proven"],
@@ -199,6 +222,13 @@ def verification(workspace: Path, active_job: dict[str, Any],
              and p.resolve().parent == candidate),
             key=lambda p: p.stat().st_mtime_ns, reverse=True,
         )
+        if not files and name == "persistence":
+            files = sorted(
+                (p for p in candidate.glob(
+                    "generation-readback-audit-" + job_id + ".json"
+                ) if p.is_file() and p.resolve().parent == candidate),
+                key=lambda p: p.stat().st_mtime_ns, reverse=True,
+            )
         if not files:
             continue
         from json import loads
@@ -207,10 +237,18 @@ def verification(workspace: Path, active_job: dict[str, Any],
             continue
         report = {
             "status": data.get("status"), "path": str(files[0]),
+            "readback_phase": ("GENERATION_EDITOR" if name == "persistence"
+                               and files[0].name.startswith("generation-readback-")
+                               else "POST_REOPEN" if name == "persistence"
+                               else "UNSPECIFIED"),
             "fidelity_verified": False, "restart_verified": False,
         }
         if name == "persistence":
             report.update({
+                "restart_verified": (data.get("restart_verified") is True
+                                     and report["readback_phase"] == "POST_REOPEN"),
+                "generation_editor_pid": data.get("generation_editor_pid"),
+                "observed_editor_pid": data.get("observed_editor_pid"),
                 "native_structure": data.get("native_structure_status"),
                 "assets": data.get("assets_class_and_disk_verified"),
                 "assets_expected": data.get("asset_count"),

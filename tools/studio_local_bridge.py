@@ -21,7 +21,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKSPACE = Path.home() / '.cutsceneai-studio' / 'runs'
+WORKSPACE = Path.home() / '.cutscene-studio' / 'runs'
 MAX_BODY = 64 * 1024
 TOKEN = secrets.token_urlsafe(32)
 LOCK = threading.RLock()
@@ -137,10 +137,60 @@ def worker_connected(folder: Path = WORKSPACE) -> dict[str, Any]:
         data = load_json(marker)
         tick = datetime.fromisoformat(str(data['heartbeat']).replace('Z', '+00:00'))
         age = (datetime.now(timezone.utc) - tick).total_seconds()
-        return {'connected': 0 <= age < 8, 'project': data.get('project'), 'level': data.get('level'), 'worker_version': data.get('worker'), 'age_seconds': round(age, 1)}
+        return {'connected': 0 <= age < 8, 'project': data.get('project'),
+                'level': data.get('level'), 'worker_version': data.get('worker'),
+                'worker_source_sha256': data.get('worker_source_sha256'),
+                'checkout_root': data.get('checkout_root'),
+                'age_seconds': round(age, 1)}
     except (ValueError, KeyError, OSError):
         return {'connected': False}
 
+
+
+# v0.5 reused one heartbeat version for several different implementations.
+# That allowed an older embedded Unreal Python runtime to accept manifests
+# prepared using recently updated Studio source adapter code.
+REQUIRED_WORKER_PROTOCOL = 'studio-editor-v0.6'
+
+
+def worker_code_mismatch(worker: dict[str, Any]) -> str | None:
+    """Reject a stale Unreal runtime before it can mutate a map.
+
+    The source hash is captured once at Unreal module import (not recomputed
+    on every heartbeat). It cannot silently update after a git pull.
+    """
+    if worker.get('worker_version') != REQUIRED_WORKER_PROTOCOL:
+        return ('Unreal companion uses ' + str(worker.get('worker_version') or
+                'an unidentified version') + ', but Studio requires ' +
+                REQUIRED_WORKER_PROTOCOL + '.')
+    expected_root = ROOT.resolve()
+    reported_root = worker.get('checkout_root')
+    # Path('') resolves to the host's current working directory, which could
+    # accidentally match ROOT. An absent/nonabsolute value is never proof of
+    # the live Unreal interpreter's module origin.
+    if not isinstance(reported_root, str) or not reported_root.strip():
+        return 'Unreal companion did not report a valid repository checkout.'
+    if not Path(reported_root).is_absolute():
+        return 'Unreal companion did not report a valid absolute repository checkout.'
+    try:
+        observed_root = Path(reported_root).resolve()
+    except (OSError, ValueError, RuntimeError):
+        return 'Unreal companion did not report a valid repository checkout.'
+    if os.path.normcase(str(observed_root)) != os.path.normcase(str(expected_root)):
+        return ('Unreal companion is running from a different CutSceneAI checkout. '
+                'Use the same repository for Studio and Unreal.')
+    expected_worker = ROOT / 'integrations' / 'unreal' / 'studio_local_editor_worker.py'
+    actual_sha = str(worker.get('worker_source_sha256') or '')
+    if actual_sha != hashlib.sha256(expected_worker.read_bytes()).hexdigest():
+        return ('Unreal companion has cached an outdated Python worker from '
+                'before the latest Studio update.')
+    return None
+
+
+def companion_upgrade_action(reason: str) -> str:
+    return (reason + ' Save the target project, completely close Unreal Editor, '
+            'restart Unreal Editor, and start the Python companion from this exact checkout. '
+            'Prepare a new transfer candidate after reconnecting.')
 
 
 def destination_readiness(folder: Path = WORKSPACE) -> dict[str, Any]:
@@ -158,11 +208,14 @@ def destination_readiness(folder: Path = WORKSPACE) -> dict[str, Any]:
     if not worker.get('connected'):
         return {'status': 'WAITING_FOR_UNREAL', 'ready': False,
                 'next_action': 'Open the selected Unreal level and start the editor companion.'}
-    if (worker.get('worker_version') == 'studio-editor-v0.1' or
-        (load_json(folder / 'connection.json').get('unity_project')
-         and worker.get('worker_version') != 'studio-editor-v0.5')):
+    if load_json(folder / 'connection.json').get('unity_project'):
+        stale_reason = worker_code_mismatch(worker)
+        if stale_reason:
+            return {'status': 'UPGRADE_COMPANION', 'ready': False,
+                    'next_action': companion_upgrade_action(stale_reason)}
+    elif worker.get('worker_version') == 'studio-editor-v0.1':
         return {'status': 'UPGRADE_COMPANION', 'ready': False,
-                'next_action': 'Unreal is running an older Studio companion. Save your work, restart Unreal Editor, and run the Python companion command shown below.'}
+                'next_action': 'Unreal is running an obsolete Studio companion; restart Unreal Editor.'}
     candidate = load_json(candidate_file)
     connected = load_json(folder / 'connection.json')
     if connected.get('auto_create_level') and worker.get('level') != connected['level_path']:
@@ -323,6 +376,7 @@ def prepare(folder: Path = WORKSPACE, options: dict[str, Any] | None = None) -> 
             'mapping_copy': str(mapping_copy), 'sequence_path': new_sequence,
             'source_feature_surface_state': coverage.get('source_feature_surface_state', 'NOT_COLLECTED'),
             'source_unresolved_components': (coverage.get('source_feature_surface') or {}).get('unresolved_component_count'),
+            'source_snapshot_partial_count': (coverage.get('source_feature_surface') or {}).get('source_snapshot_partial_count', 0),
             'feature_dispatch_summary': {
                 'catalog_semantics': dispatch.get('catalog_semantic_count'),
                 'catalog_families': dispatch.get('catalog_family_count'),
@@ -415,14 +469,21 @@ def queue_trial(candidate_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
     if (os.path.normcase(str(heartbeat.get('project') or '')) != os.path.normcase(config['target_project'])
         or (not config.get('auto_create_level') and heartbeat.get('level') != config['level_path'])):
         raise ValueError('Unreal worker is connected to a different project or level.')
+    if config.get('unity_project'):
+        stale_reason = worker_code_mismatch(heartbeat)
+        if stale_reason:
+            raise ValueError('Unreal companion update required: ' +
+                             companion_upgrade_action(stale_reason))
     readiness = destination_readiness(folder)
     candidate_record = folder / 'active-candidate.json'
     auto = load_json(candidate_record).get('automatic_setup') if candidate_record.is_file() else {}
     auto = auto or {}
     automatic_requested = bool(auto.get('available')) and not readiness.get('ready')
     if automatic_requested:
-        if heartbeat.get('worker_version') != 'studio-editor-v0.5':
-            raise ValueError('Restart Unreal with the v0.5 automatic-import editor companion.')
+        stale_reason = worker_code_mismatch(heartbeat)
+        if stale_reason:
+            raise ValueError('Automatic import companion is outdated: ' +
+                             companion_upgrade_action(stale_reason))
         if not auto.get('ready'):
             raise ValueError('Automatic asset preparation blocked: ' + '; '.join(auto.get('blockers', [])))
         import studio_auto_assets
@@ -470,13 +531,38 @@ def job_status(job_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
     if not job_path.is_file():
         raise ValueError('Job not found.')
     job = load_json(job_path)
-    return {key: job.get(key) for key in (
-        'job_id', 'status', 'generation_status', 'sequence_path', 'diagnostic_file',
+    result = {key: job.get(key) for key in (
+        'job_id', 'candidate_id', 'created_at', 'status', 'generation_status',
+        'sequence_path', 'diagnostic_file',
         'receipt_file', 'error', 'fidelity_verified', 'generated_sequence', 'setup_receipt_file', 'setup_status',
         'assets_imported_count', 'actors_created_count', 'bindings_created_count',
         'visual_audit_status', 'visual_audit_error', 'closed_loop_status',
         'closed_loop_report_file', 'closed_loop_error', 'repair_iterations',
-        'repair_changes', 'repair_status', 'repair_error')}
+        'repair_changes', 'repair_status', 'repair_error',
+        'execution_stage', 'failure_stage')}
+    # Read only the exact receipt belonging to this job's candidate.
+    # Expose the actionable failed operation without publishing a traceback
+    # or allowing a forged job path to read files outside Studio's workspace.
+    candidate_id = str(job.get('candidate_id') or '')
+    candidate_root = (folder / 'candidates').resolve()
+    candidate_dir = (candidate_root / candidate_id).resolve()
+    expected = candidate_dir / ('automatic-setup-receipt-' + job_id + '.json')
+    recorded = str(job.get('setup_receipt_file') or '')
+    if (candidate_id and candidate_dir.is_relative_to(candidate_root)
+            and candidate_dir == Path(str(job.get('candidate_dir') or '')).resolve()
+            and recorded and Path(recorded).resolve() == expected.resolve()
+            and expected.is_file() and expected.stat().st_size <= 1024 * 1024):
+        try:
+            setup = load_json(expected)
+            if setup.get('kind') == 'cutsceneai.studio.automatic_setup_receipt':
+                result['setup_failed_step'] = setup.get('failed_step')
+                result['setup_recovery'] = setup.get('recovery')
+                setup_error = setup.get('error')
+                if isinstance(setup_error, dict):
+                    result['setup_error'] = setup_error.get('message')
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    return result
 
 
 def diagnostic_summary(job_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
@@ -719,7 +805,8 @@ def create_handler(webroot: Path, folder: Path = WORKSPACE):
                     elif route == '/api/prepare':
                         result = prepare(folder, data)
                     elif route == '/api/approve-one-click':
-                        result = approve_one_click(str(data.get('candidate_id', '')), folder)
+                        result = approve_one_click(
+                            str(data.get('candidate_id', '')), folder)
                     elif route == '/api/execute':
                         result = queue_trial(str(data.get('candidate_id', '')), folder)
                     elif route == '/api/observation':
@@ -753,6 +840,9 @@ def main(argv=None) -> int:
     if not (args.web / 'index.html').is_file():
         parser.error('Web UI directory is missing index.html.')
     WORKSPACE.mkdir(parents=True, exist_ok=True)
+    package_dir = str(ROOT / 'packages/studio')
+    if package_dir not in sys.path:
+        sys.path.insert(0, package_dir)
     handler = create_handler(args.web.resolve(), WORKSPACE)
     server = ThreadingHTTPServer(('127.0.0.1', args.port), handler)
     print(f'CutSceneAI Studio: http://127.0.0.1:{args.port}')

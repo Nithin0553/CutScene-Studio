@@ -1,0 +1,57 @@
+name: Studio CI
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  import-baseline:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/deterministic-studio-v1'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Import pinned pre-agent source (only on empty candidate branch)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f tools/studio_local_bridge.py ]; then exit 0; fi
+          git fetch --no-tags --depth=1 https://github.com/Nithin0553/CutsceneAI.git 3b3ef7071e4e23efefa4d1ac6c7dee3c26738153
+          test "$(git rev-parse FETCH_HEAD)" = 3b3ef7071e4e23efefa4d1ac6c7dee3c26738153
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+          git archive FETCH_HEAD | tar -x -C "$tmp"
+          rm -rf "$tmp/.github"
+          cp -a "$tmp/." .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Import exact deterministic pre-AI Studio baseline"
+          git push origin HEAD:refs/heads/feature/deterministic-studio-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install pytest ruff jsonschema
+      - run: python -m compileall -q packages tools integrations/unreal
+      - run: python -m pytest -q
+      - run: node --check apps/studio-web/app.js && node --check apps/studio-web/cinematic.js && node tests/studio/test_cinematic_ui.cjs
+      - run: python -m ruff check tests
+      - run: python tools/repo_check.py
+  regression:
+    if: github.ref != 'refs/heads/feature/deterministic-studio-v1' || github.event_name != 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install pytest ruff jsonschema
+      - run: python -m compileall -q packages tools integrations/unreal
+      - run: python -m pytest -q
+      - run: node --check apps/studio-web/app.js && node --check apps/studio-web/cinematic.js && node tests/studio/test_cinematic_ui.cjs
+      - run: python -m ruff check tests
+      - run: python tools/repo_check.py

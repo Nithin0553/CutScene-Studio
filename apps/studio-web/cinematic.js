@@ -12,7 +12,11 @@
     diagnosis:null, feedback:null, running:false, detailsOpen:false, menuOpen:false,
     censusOptions:[], censusPath:'', censusSelection:null, censusIssue:false, editorHelpOpen:false};
   const pathRoot = () => String(state.status?.repo_root||'').replaceAll('\\','/');
-  const workerCommand = () => 'import sys; sys.path.insert(0, '+JSON.stringify(pathRoot()+'/integrations/unreal')+'); import studio_local_editor_worker as w; w.start()';
+  const workerCommand = () => {
+    const folder=pathRoot()+'/integrations/unreal';
+    const workspace=String(state.status?.workspace||'').replaceAll('\\','/');
+    return 'import sys; from pathlib import Path; sys.path.insert(0, '+JSON.stringify(folder)+'); import studio_local_editor_worker as w; assert Path(w.__file__).resolve() == Path('+JSON.stringify(folder+'/studio_local_editor_worker.py')+').resolve(), "Old Studio worker cached; save and restart Unreal once"; w.start(workspace='+JSON.stringify(workspace)+')';
+  };
   const connection = () => state.status?.connection;
   const worker = () => state.status?.unreal_worker || {};
   const readiness = () => state.status?.destination_readiness || {};
@@ -96,7 +100,7 @@
       }).join('')+'</select></label>';
   }
   function unrealConnectionPanel(project){
-    if(!pathRoot())return '';
+    if(!pathRoot()||!state.status?.workspace)return '';
     const w=worker();
     const same=Boolean(project&&w.connected&&norm(w.project)===norm(project)&&norm(w.checkout_root)===norm(pathRoot()));
     const label=same?'Connected':w.connected?'Check project / checkout':'Not connected';
@@ -204,15 +208,15 @@
       phase==='BLOCKED'?'Transfer blocked':'Checking transfer…';
     const command=workerCommand();
     return progress()+'<main class="transfer-view"><div class="engine-pair">'+
-      card('unity',connection()?.unity_project||state.folders.unity,true)+line(true)+
-      card('unreal',connection()?.target_project||state.folders.unreal,true)+'</div>'+
+      card('unity',connection()?.unity_project||state.folders.unity,true)+line(validEditor())+
+      card('unreal',connection()?.target_project||state.folders.unreal,validEditor())+'</div>'+
       '<h2>'+esc(label)+'</h2>'+
       (state.censusSelection?.source_snapshot_partial_count?
         '<p class="subnote">'+esc(state.censusSelection.source_snapshot_partial_count)+
         ' native source snapshots recorded; collision, URP and signal behavior remains Unreal-unverified. See Detailed report.</p>':'')+
       (phase==='WAITING_FOR_EDITOR'?'<div class="editor-instructions"><p>Open the target project. Paste this into the Unreal Python Console.</p>'+
         '<pre id="worker-command">'+esc(command)+'</pre>'+button('Copy connection command','copy-worker',false,'secondary')+
-        '<p class="subnote">'+esc(d.next_action||'Waiting for the editor')+'</p></div>':'')+
+        '<p class="subnote">'+esc(worker().connected?('Open project: '+short(worker().project)+' · Level: '+(worker().level||'Unknown')+' · Selected level: '+(connection()?.level_path||'Unknown')):(d.next_action||'Waiting for the editor'))+'</p></div>':'')+
       (phase==='BLOCKED'?'<p class="warning" role="alert">'+esc(state.error||j.error||d.next_action||'Read the diagnostic report')+'</p>':'')+
       (phase==='BLOCKED'&&state.censusIssue&&state.censusSelection?
         '<section class="census-blocker"><h3>'+esc(state.censusSelection.unresolved_components)+

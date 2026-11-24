@@ -60,3 +60,28 @@ def test_worker_reports_missing_mapped_actors_without_modifying_scene(tmp_path, 
     assert result['found_actor_count']==1
     assert result['scene_modified'] is False
     assert result['candidate_id']==cid
+
+
+def test_worker_start_writes_presence_and_repeated_start_does_not_register_twice(tmp_path, monkeypatch):
+    callbacks = []
+    messages = []
+    fake = SimpleNamespace(
+        register_slate_post_tick_callback=lambda cb: callbacks.append(cb) or 1,
+        unregister_slate_post_tick_callback=lambda handle: None,
+        log_warning=messages.append,
+    )
+    monkeypatch.setitem(sys.modules, 'unreal', fake)
+    spec = importlib.util.spec_from_file_location('worker_start_test', ROOT/'integrations/unreal/studio_local_editor_worker.py')
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    monkeypatch.setattr(worker, '_loaded_project', lambda: str(tmp_path/'Target.uproject'))
+    monkeypatch.setattr(worker, '_loaded_level', lambda: '/Game/Maps/Test')
+    workspace = tmp_path/'runs'
+    worker.start(workspace)
+    worker.start(workspace)
+    record = json.loads((workspace/'unreal-worker.json').read_text(encoding='utf-8'))
+    assert record['level'] == '/Game/Maps/Test'
+    assert record['checkout_root'] == str(ROOT.resolve())
+    assert len(callbacks) == 1
+    assert 'Already connected' in messages[-1]
+    assert not (workspace/'jobs').exists()

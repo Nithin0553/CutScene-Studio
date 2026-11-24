@@ -713,7 +713,7 @@ def create_handler(webroot: Path, folder: Path = WORKSPACE):
             if path == '/api/status':
                 cfg = folder / 'connection.json'
                 return self.reply(200, {'service': 'CutSceneAI Studio Local Companion',
-                                        'repo_root': str(ROOT), 'token': TOKEN, 'connected': cfg.is_file(),
+                                        'repo_root': str(ROOT), 'workspace': str(folder.resolve()), 'token': TOKEN, 'connected': cfg.is_file(),
                                         'connection': load_json(cfg) if cfg.is_file() else None,
                                         'unreal_worker': worker_connected(folder),
                                         'destination_readiness': destination_readiness(folder),

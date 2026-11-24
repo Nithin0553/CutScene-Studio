@@ -49,7 +49,11 @@ def _now():
 
 
 def _loaded_project():
-    return str(Path(unreal.Paths.get_project_file_path()).resolve())
+    path = unreal.Paths.get_project_file_path()
+    convert = getattr(unreal.Paths, 'convert_relative_path_to_full', None)
+    if callable(convert):
+        path = convert(path)
+    return str(Path(path).resolve())
 
 
 def _loaded_level():
@@ -425,19 +429,23 @@ def _report_inspection_failure(error):
     })
 
 
+def _write_heartbeat():
+    WORKSPACE.mkdir(parents=True, exist_ok=True)
+    _save(WORKSPACE / 'unreal-worker.json', {
+        'heartbeat': _now(), 'project': _loaded_project(),
+        'level': _loaded_level(), 'worker': WORKER_PROTOCOL,
+        'checkout_root': str(ROOT.resolve()),
+        'worker_source_sha256': WORKER_SOURCE_SHA256,
+    })
+
+
 def _tick(_delta):
     global LAST_TICK, BUSY
     if BUSY or time.monotonic() - LAST_TICK < 1.0:
         return
     LAST_TICK = time.monotonic()
     try:
-        WORKSPACE.mkdir(parents=True, exist_ok=True)
-        _save(WORKSPACE / 'unreal-worker.json', {
-            'heartbeat': _now(), 'project': _loaded_project(),
-            'level': _loaded_level(), 'worker': WORKER_PROTOCOL,
-            'checkout_root': str(ROOT.resolve()),
-            'worker_source_sha256': WORKER_SOURCE_SHA256,
-        })
+        _write_heartbeat()
         try:
             _update_destination_readiness()
         except Exception as readiness_error:
@@ -478,16 +486,30 @@ def _tick(_delta):
 def start(workspace=None):
     """Starts the worker; no jobs are processed until UI explicitly queues one."""
     global HANDLE, WORKSPACE
+    requested = Path(workspace).expanduser().resolve() if workspace is not None else WORKSPACE.resolve()
     if HANDLE is not None:
+        if requested != WORKSPACE.resolve():
+            raise RuntimeError('Studio worker already uses a different workspace. Finish any active job before reconnecting.')
+        if BUSY:
+            raise RuntimeError('Studio worker is executing a job; do not restart it.')
+        _write_heartbeat()
+        unreal.log_warning('[CutScene Studio] Already connected: ' + str(WORKSPACE) +
+                           ' | ' + _loaded_project() + ' | ' + _loaded_level())
         return
-    if workspace is not None:
-        WORKSPACE = Path(workspace).expanduser().resolve()
+    WORKSPACE = requested
     if not callable(getattr(unreal, 'register_slate_post_tick_callback', None)):
         raise RuntimeError('Unreal Editor does not support Python Slate tick callbacks.')
     # Explicit approval to modify a staging Unreal project remains the user's
     # responsibility. Never start this worker on the only project copy.
     HANDLE = unreal.register_slate_post_tick_callback(_tick)
-    unreal.log_warning('[CutSceneAI Studio] Local worker listening for explicit prepared trial jobs.')
+    try:
+        _write_heartbeat()
+    except Exception:
+        unreal.unregister_slate_post_tick_callback(HANDLE)
+        HANDLE = None
+        raise
+    unreal.log_warning('[CutScene Studio] Connected: ' + str(WORKSPACE) +
+                       ' | ' + _loaded_project() + ' | ' + _loaded_level())
 
 
 def stop():

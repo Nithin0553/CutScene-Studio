@@ -68,7 +68,7 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
       requests.push({url,body});
       let result = {};
       if (url === '/api/status') {
-        result = {token: 'stubtoken', repo_root: 'B:/Research/CutSceneAI/CutsceneAI',
+        result = {token: 'stubtoken', repo_root: 'B:/Research/CutSceneAI/CutsceneAI', workspace:'C:/Users/Test/.cutscene-studio/runs',
           connection: connected, candidate, active_job: currentJob?.job_id || null,
           one_click_approval: approval,
           unreal_worker: {connected: editorReady, project: file, level, worker_version: 'studio-editor-v0.5'},
@@ -214,7 +214,8 @@ async function testEarlyUnrealConnectionCommand() {
   assert.match(x.app.innerHTML,/Copy connection command/);
   await x.click('copy-worker');
   assert.match(x.copied(), /B:\/Research\/CutSceneAI\/CutsceneAI\/integrations\/unreal/);
-  assert.match(x.copied(), /import studio_local_editor_worker as w; w.start\(\)/);
+  assert.match(x.copied(), /import studio_local_editor_worker as w; assert Path\(w\.__file__\)/);
+  assert.match(x.copied(), /w.start\(workspace="C:\/Users\/Test\/\.cutscene-studio\/runs"\)/);
   assert.ok(!x.calls.includes('/api/execute'));
   assert.ok(!x.calls.includes('/api/prepare'));
   assert.ok(!x.calls.includes('/api/connect-projects'));

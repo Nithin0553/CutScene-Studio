@@ -18,7 +18,10 @@ def create(tmp, *, ambiguous=False, missing_audio=False):
     (models/'Ch26_nonPBR.fbx').write_bytes(b'character-fbx-2')
     for name in ('Walking.fbx','Waving.fbx','Breathing Idle.fbx'):
         (anim/name).write_bytes(('clip-'+name).encode())
-    if ambiguous: (models/'Ch31_nonPBR.FBX').write_bytes(b'conflict')
+    if ambiguous:
+        duplicate = models / 'Conflicting' / 'Ch31_nonPBR.fbx'
+        duplicate.parent.mkdir()
+        duplicate.write_bytes(b'conflict')
     if not missing_audio: (sounds/'Cue.wav').write_bytes(b'RIFF'+bytes(4)+b'WAVE'+bytes(36))
     csir={'schema_version':'0.1.0','source':{'engine':'unity'},
           'assets':[{'asset_id':'walk','name':'A_Walk_RootMotion'},

@@ -74,7 +74,7 @@ def test_report_never_overwrites_existing_evidence(tmp_path):
     path = tmp_path / "closed-loop.json"
     report = review.evaluate(None, None)
     review.write_new(path, report)
-    assert json.loads(path.read_text()) == report
+    assert json.loads(path.read_text(encoding="utf-8")) == report
     with pytest.raises(FileExistsError):
         review.write_new(path, report)
 
@@ -91,7 +91,7 @@ def test_one_click_approval_requires_exact_candidate_and_source_permission(tmp_p
     (folder / "connection.json").write_text(json.dumps(config))
     approved = bridge.approve_one_click("20261101T111111Z_abcdef12", folder)
     assert approved["approved"]
-    assert json.loads((folder / "one-click-approval.json").read_text())["target_level"] == "/Game/Maps/L_Stage"
+    assert json.loads((folder / "one-click-approval.json").read_text(encoding="utf-8"))["target_level"] == "/Game/Maps/L_Stage"
     with pytest.raises(ValueError, match="stale or invalid"):
         bridge.approve_one_click("other", folder)
     config["source_rights_confirmed"] = False
@@ -101,9 +101,9 @@ def test_one_click_approval_requires_exact_candidate_and_source_permission(tmp_p
 
 
 def test_cinematic_ui_calls_live_backend_and_uses_indeterminate_progress():
-    ui = (ROOT / "apps" / "studio-web" / "cinematic.js").read_text()
-    page = (ROOT / "apps" / "studio-web" / "index.html").read_text()
-    css = (ROOT / "apps" / "studio-web" / "cinematic.css").read_text()
+    ui = (ROOT / "apps" / "studio-web" / "cinematic.js").read_text(encoding="utf-8")
+    page = (ROOT / "apps" / "studio-web" / "index.html").read_text(encoding="utf-8")
+    css = (ROOT / "apps" / "studio-web" / "cinematic.css").read_text(encoding="utf-8")
     for route in ("pick-folder", "discover", "connect-projects", "source-surfaces",
                   "prepare", "approve-one-click", "execute", "jobs/", "verification", "closed-loop"):
         assert route in ui

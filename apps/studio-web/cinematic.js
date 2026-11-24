@@ -201,7 +201,7 @@
       (state.censusSelection?.source_snapshot_partial_count?
         '<p class="subnote">'+esc(state.censusSelection.source_snapshot_partial_count)+
         ' native source snapshots recorded; collision, URP and signal behavior remains Unreal-unverified. See Detailed report.</p>':'')+
-      (phase==='WAITING_FOR_EDITOR'?'<div class="editor-instructions"><p>Open the target project. Paste this into Unreal's Python Console.</p>'+
+      (phase==='WAITING_FOR_EDITOR'?'<div class="editor-instructions"><p>Open the target project. Paste this into the Unreal Python Console.</p>'+
         '<pre id="worker-command">'+esc(command)+'</pre>'+button('Copy connection command','copy-worker',false,'secondary')+
         '<p class="subnote">'+esc(d.next_action||'Waiting for the editor')+'</p></div>':'')+
       (phase==='BLOCKED'?'<p class="warning" role="alert">'+esc(state.error||j.error||d.next_action||'Read the diagnostic report')+'</p>':'')+

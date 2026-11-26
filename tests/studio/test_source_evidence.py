@@ -97,7 +97,10 @@ class FakeAgent:
     def select_mapping(self, feature, candidates):
         self.calls.append((feature, candidates))
         assert len(candidates) == 1
-        return MappingDecision("proposed", candidates[0].mapping_id, "Fixture proposal")
+        return MappingDecision(
+            "proposed", candidates[0].mapping_id,
+            "Selected from eligible mappings; native preflight still required.",
+        )
 
 
 @pytest.mark.parametrize(
@@ -346,5 +349,13 @@ def test_ai_handoff_rejects_changed_evidence(handoff_files, change):
         source["tracks"][0]["name"] = "Changed"
         paths[0].write_text(json.dumps(source), encoding="utf-8")
     paths[2].write_text(json.dumps(report), encoding="utf-8")
-    with pytest.raises(backend.TransferBackendError):
+    expected_error = {
+        "hash": "snapshot, resources or audit differ",
+        "mapping": "not source-eligible",
+        "audit": "snapshot, resources or audit differ",
+        "track": "track identity differs",
+        "authorization": "complete, advisory source analysis",
+        "source": "decision or evidence differs",
+    }
+    with pytest.raises(backend.TransferBackendError, match=expected_error[change]):
         backend.inspect_ai_handoff(*paths)

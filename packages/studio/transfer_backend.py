@@ -281,7 +281,12 @@ def _native_track(
     isolated["tracks"] = [track]
     plan = csir_plan.build_plan(isolated, mapping)
     # Camera setup is derived from scene entities, not an individual track.
-    return [a for a in plan["actions"] if a.get("kind") != "camera_setup"]
+    actions = [a for a in plan["actions"] if a.get("kind") != "camera_setup"]
+    track_id = track.get("track_id")
+    if isinstance(track_id, str) and track_id:
+        for action in actions:
+            action["source_track_id"] = track_id
+    return actions
 
 
 def _activation_adapter(

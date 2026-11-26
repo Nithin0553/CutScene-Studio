@@ -83,10 +83,17 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Live provider verified; single-agent mapping workflow added
+
+- Owner's two live provider requests with qwen2.5:7b-instruct both selected skeletal_animation from the constrained enum. Cold total 67.7720602 s, load 65.2860756 s, generation 1.2051857 s. Warm total 1.9010949 s, load 0.2560354 s, generation 1.2144197 s. Warm latency was approximately 35.6x lower; this is a tiny mapping task, not an end-to-end benchmark. No additional model required. Keep bounded model reuse within a transfer and release only when no other application needs it.
+- Added packages/studio/transfer_agent.py (4b62111): one LangGraph StateGraph with candidate collection, one Ollama reasoning call and deterministic selection validation. Caller supplies trusted candidate records, exact source-feature filtering excludes unrelated mappings, schema enumerates permitted IDs and unsupported, no eligible candidate avoids inference, abstention and inference failure are distinct, invalid/duplicate/reserved IDs fail closed. Graph tracing disabled via LangSmith tracing context. No engine mutations, native tool calls, RAG index, repair or actual CSIR/CED integration yet; a proposed ID is not a validated executable conversion.
+- Added tests/studio/test_transfer_agent.py (e607881): ten mocked graph test cases for selection, abstention, missing/invalid candidates, provider failure and repeated calls. Tests skip when LangGraph is absent. Added optional agent dependency langgraph>=1,<2 in pyproject.toml (0adca02). No existing deterministic conversion paths changed. No new tests or dependency installs performed in owner's environment; current draft PR #1 remains open; connector returned no CI runs for prior head.
+- Next: fast-forward active branch, set D: cache/temp paths and disable tracing, install LangGraph in existing .venv-studio, run pip check, targeted graph/provider pytest and Ruff, then a live graph smoke with illustrative candidates. Capture output before connecting graph to real mapping registry/CSIR/CED. No engines should be launched for this isolated milestone.
+
 ### 2026-11-26 — Ollama provider unit tests and lint passed
 
 - Owner reports Ruff checks passed and `!6 passed` (interpreted as 16 passed, consistent with the 16 parametrized provider test cases). No live provider inference output supplied yet. Previous full regression baseline remains 713 passed, 7 skipped before the new provider tests; do not imply the full suite was rerun.
-- Next: run the constrained mapping-ID live smoke against the existing local Qwen 2.5 model, capture two consecutive requests with cold/warm timings and unload only if no other application is using the model. After validating the live provider, proceed to the single LangGraph agent foundation. No new dependencies, model downloads, engine changes, or native tests in this checkpoint.
+- The live provider smoke subsequently passed; see latest checkpoint above. After validating the live provider, proceed to the single LangGraph agent foundation. No new dependencies, model downloads, engine changes, or native tests in this checkpoint.
 
 ### 2026-11-26 — Ollama provider lint fixes
 
@@ -266,6 +273,7 @@ Keep this concise and newest-first. For every change add date, summary, affected
 
 | Date | Change / evidence |
 | --- | --- |
+| 2026-11-26 | Live provider returned correct mapping twice (67.77 s cold / 1.90 s warm); added isolated LangGraph mapping workflow, optional dependency and mocked tests. Local graph validation pending. |
 | 2026-11-26 | Owner reports provider lint and unit tests passed (16 inferred from reported typo); live smoke pending. Documentation only. |
 | 2026-11-26 | Fixed provider TRY004 and test I001 from owner's Ruff output; rerun pending. No native or live provider tests performed. |
 | 2026-11-26 | Owner verified baseline 713 passed, 7 skipped; added isolated local Ollama provider and mocked tests. New tests and live provider inference pending. No engine changes. |

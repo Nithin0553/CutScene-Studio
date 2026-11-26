@@ -83,9 +83,15 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Source evidence regression rerun passed; real export not located
+
+- Owner reports corrected targeted suite: 51 passed in 3.93 s. No explicit corrected Ruff output supplied, so lint rerun is not yet independently confirmed. Workspace file search returned the two CSIR schemas and files under pytest temporary directories only; no actual exported Unity cutscene was identified. Do not use test fixtures as native evidence.
+- Inspected UnityTimelineExtractor.cs and CutsceneAIExportMenu.cs: Export for Studio writes a unique <timeline>-<guid>-<unique>.csir.json inside the selected Unity project's CutsceneAI/Exports directory. Search existing D: Unity project directories for *.csir.json excluding repository/test/cache outputs. If no previous export is available, request a source-only export from the existing Unity benchmark project after confirming its location; no Unreal launch or target mutation needed. Preserve historical data. Do not copy source data into Git.
+- Next: locate actual source export, run read-only source evidence analysis on that file; rerun Ruff if not already done and full regression including AI additions. Existing baseline remains 713 passed, 7 skipped before AI changes. No native source/target verification or new application code in this checkpoint.
+
 ### 2026-11-26 — Source evidence tests passed; lint correction
 
-- Owner ran 51 targeted source evidence, mapping resources, agent and provider tests: 51 passed in 3.70 s. Ruff on source evidence and mapping files reported two SIM102 diagnostics in source_evidence.py; no other diagnostics reported. Combined nested camera-cut and transform conditions without changing their semantics (3e59b5c). Corrected Ruff and pytest reruns still pending.
+- Owner ran 51 targeted source evidence, mapping resources, agent and provider tests: 51 passed in 3.70 s. Ruff on source evidence and mapping files reported two SIM102 diagnostics in source_evidence.py; no other diagnostics reported. Combined nested camera-cut and transform conditions without changing their semantics (3e59b5c). Corrected pytest subsequently passed; Ruff output not yet supplied.
 - Next: safely fetch/fast-forward the active branch, rerun Ruff and targeted pytest using D: temporary storage, then locate an existing actual Unity CSIR export and test read-only source-bound mapping proposals. No actual exported CSIR path supplied yet. Native transfer, full regression since the AI additions, and scene-level analysis remain pending. No additional dependency/model installs or engine launches needed for this checkpoint.
 
 ### 2026-11-26 — Live CED retrieval passed; CSIR source evidence adapter added
@@ -297,6 +303,7 @@ Keep this concise and newest-first. For every change add date, summary, affected
 
 | Date | Change / evidence |
 | --- | --- |
+| 2026-11-26 | Corrected 51 targeted tests passed; workspace search found only schemas and test fixtures. Locate actual Unity project export. |
 | 2026-11-26 | Owner passed 51 targeted tests; fixed two source evidence SIM102 lint diagnostics. Local rerun and real source export pending. |
 | 2026-11-26 | Owner confirmed all five live CED smoke outcomes; added source-bound primary action proposals and 12 synthetic CSIR tests. Local validation pending. |
 | 2026-11-26 | Owner passed all 39 targeted tests; fixed mapping resource TRY004. Local lint rerun and live CED smoke pending. |

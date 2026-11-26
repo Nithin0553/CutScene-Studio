@@ -69,6 +69,7 @@ def test_inference_failure_is_not_unsupported():
     decision = TransferAgent(provider).select_mapping("animation.clip", CANDIDATES)
     assert decision.status == "failed"
     assert decision.mapping_id is None
+    assert decision.reason == "Local model inference failed: Local model unavailable"
 
 
 def test_duplicate_ids_rejected():

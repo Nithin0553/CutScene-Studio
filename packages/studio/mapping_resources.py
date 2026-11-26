@@ -52,7 +52,7 @@ class MappingResources:
             raise ValueError("Unexpected CED capability version or engine pair")
         for group in _GROUPS.values():
             if not isinstance(self.capabilities.get(group), dict):
-                raise ValueError("Missing CED capability group")
+                raise TypeError("Missing or invalid CED capability group")
         self.capabilities_sha256 = hashlib.sha256(raw).hexdigest()
 
     def retrieve(self, source_feature: str, source_kind: str) -> MappingEvidence:

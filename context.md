@@ -83,10 +83,17 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Live CED retrieval passed; CSIR source evidence adapter added
+
+- Owner's actual resource smoke: camera.cut -> camera_cut proposed (50.5658926 s); camera.fov -> camera_fov proposed (2.0882545 s); animation.track withheld for ambiguity; audio.track withheld as KNOWN_PARTIAL; physics.collider withheld as KNOWN_UNSUPPORTED. All five expected outcomes, three cases made no inference call. Previous 39 targeted tests passed in 3.64 s before the lint correction; corrected Ruff/pytest rerun not explicitly reported. Native preflight still required.
+- Inspected integrations/unreal/csir_plan.py build_plan, _section_curve_channels and transform sampling; canonical CSIR schema at packages/contracts/csir/csir-v0.1.schema.json; existing CED audit and versioned resources. Added packages/studio/source_evidence.py (2477179): validates schema and Unity engine, snapshots source and records canonical JSON digest, checks duplicate entity/asset/track IDs, uses existing CED audit with no destination mapping, retrieves real mapping candidates and narrows primary actions using track binding and source payload. Character animation requires animation.clip references and source offsets; prop/actor/camera animation requires recognizable transform channels with keys; camera cuts require camera binding and camera.cut sections. Missing evidence/inactive/partial cases do not call LLM. Proposal retains source track ID, binding type, resource hashes and track-local CED blocking states. This is a read-only primary-action proposal, not a complete conversion plan, scene readiness, full source validation or native fidelity certification. A character clip or transform channel is evidence of a candidate route, not proof of compatible skeleton, timing, curve evaluation or target assets; existing deterministic preflight and execution remain authoritative. No changes to existing planner.
+- Added tests/studio/test_source_evidence.py (fbf7efa): 12 cases with schema-valid synthetic CSIR and mocked agent, including skeletal/transform/camera distinction, missing references, inactive track, duplicate IDs, wrong engine, invalid schema and snapshot isolation. Tests not executed here; real exported CSIR and native engine verification pending. No new dependencies.
+- Next: owner safely fetch/fast-forward, run targeted 51 tests and Ruff on new and corrected files using D: temp; run source adapter against an existing actual Unity CSIR export (if available, do not launch engines just to generate a new one). Inspect track-local alerts and overall CED findings; do not enable native transfer from proposals. Full suite and actual source/target preflight before integration. Draft PR #1 remains open; no CI runs returned for prior head.
+
 ### 2026-11-26 — CED retrieval automated tests passed; lint correction
 
 - Owner ran the targeted provider, agent and mapping resource suite: 39 passed in 3.64 s. Ruff reported one TRY004 diagnostic in mapping_resources.py for a capability group that is not a dictionary. Fixed by raising TypeError with a clearer message (79c9487). No conversion behavior or capability policy changed.
-- Next: fast-forward, rerun Ruff and targeted pytest, then run the previously supplied real-resource live inference smoke. No live CED resource results or native tests have been supplied yet. Full regression remains pending after agent integration; proceed to CSIR source evidence only after validating this checkpoint.
+- The owner subsequently supplied the successful live CED smoke; see latest checkpoint above. Local lint rerun not explicitly reported. Full regression remains pending after agent integration; proceed to CSIR source evidence only after validating this checkpoint.
 
 ### 2026-11-26 — LangGraph live smoke passed; existing CED retrieval integrated
 
@@ -285,6 +292,7 @@ Keep this concise and newest-first. For every change add date, summary, affected
 
 | Date | Change / evidence |
 | --- | --- |
+| 2026-11-26 | Owner confirmed all five live CED smoke outcomes; added source-bound primary action proposals and 12 synthetic CSIR tests. Local validation pending. |
 | 2026-11-26 | Owner passed all 39 targeted tests; fixed mapping resource TRY004. Local lint rerun and live CED smoke pending. |
 | 2026-11-26 | Owner passed 26 provider/agent tests and three live graph cases; added read-only strict CED mapping resource retrieval and ambiguity guard with 13 tests. Local verification pending. |
 | 2026-11-26 | Live provider returned correct mapping twice (67.77 s cold / 1.90 s warm); added isolated LangGraph mapping workflow, optional dependency and mocked tests. Local graph validation pending. |

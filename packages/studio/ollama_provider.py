@@ -84,7 +84,9 @@ class OllamaProvider:
                 raise OllamaError("Ollama response exceeded size limit")
             result = json.loads(raw)
         except (OSError, http.client.HTTPException, ValueError) as exc:
-            raise OllamaError(f"Local Ollama request failed at {path}") from exc
+            raise OllamaError(
+                f"Local Ollama request failed at {path} ({type(exc).__name__})"
+            ) from exc
         finally:
             conn.close()
         if not isinstance(result, dict) or "error" in result:

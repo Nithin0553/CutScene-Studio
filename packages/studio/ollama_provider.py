@@ -130,7 +130,7 @@ class OllamaProvider:
         try:
             data = json.loads(payload["response"])
             if not isinstance(data, dict):
-                raise ValueError("Expected object")
+                raise TypeError("Expected object")
             Draft202012Validator(schema).validate(data)
         except (KeyError, TypeError, ValueError, ValidationError) as exc:
             raise OllamaError("Model output failed JSON schema validation") from exc

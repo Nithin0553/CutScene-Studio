@@ -86,9 +86,12 @@ class SourceEvidence:
     ) -> str | None:
         sections = track["sections"]
         feature = track["ced_type"]
-        if feature == "camera.cut" and binding_type == "entity.camera":
-            if all(section["ced_type"] == "camera.cut" for section in sections):
-                return "camera_cut"
+        if (
+            feature == "camera.cut"
+            and binding_type == "entity.camera"
+            and all(section["ced_type"] == "camera.cut" for section in sections)
+        ):
+            return "camera_cut"
         if feature != "animation.track":
             return None
         if not all(section["ced_type"] == "animation.section" for section in sections):
@@ -102,9 +105,11 @@ class SourceEvidence:
                 for section in sections
             ):
                 return "skeletal_animation"
-        elif binding_type in {"entity.prop", "entity.actor", "entity.camera"}:
-            if all(_has_transform_keys(section) for section in sections):
-                return "transform"
+        elif (
+            binding_type in {"entity.prop", "entity.actor", "entity.camera"}
+            and all(_has_transform_keys(section) for section in sections)
+        ):
+            return "transform"
         return None
 
     def propose_track(self, agent: TransferAgent, track_id: str) -> SourceTrackDecision:

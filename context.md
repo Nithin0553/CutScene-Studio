@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Ollama provider lint fixes
+
+- Owner's Ruff 0.17.6 check reported TRY004 (non-object model output raised ValueError instead of TypeError) and I001 (extra blank line after imports in provider test). Fixed both in 5cbbad1 and 4a227da; existing exception handler already catches TypeError and still raises OllamaError for invalid model output. No change to inference or transfer behavior.
+- Targeted provider test result and live provider smoke output have not been supplied; do not claim either passed. Next: fetch/fast-forward the active branch, rerun Ruff on the two files and the targeted pytest suite on D:, then run the previously documented local constrained mapping-ID cold/warm inference smoke. Record results before LangGraph integration.
+
 ### 2026-11-26 — Deterministic regression baseline passed; local Ollama provider added
 
 - Owner ran tests on Windows/Python 3.12.10 at 5d576f5: pip installed pytest 8.4.2 and Ruff 0.17.6 into existing D: .venv-studio after a transient network reset; pip check found no broken requirements. Targeted Windows storage test: 1 passed in 1.60 s. Full suite: 713 passed, 7 skipped in 120.75 s. Skip reasons not yet reported. No native Unity/Unreal certification implied.
@@ -256,6 +261,7 @@ Keep this concise and newest-first. For every change add date, summary, affected
 
 | Date | Change / evidence |
 | --- | --- |
+| 2026-11-26 | Fixed provider TRY004 and test I001 from owner's Ruff output; rerun pending. No native or live provider tests performed. |
 | 2026-11-26 | Owner verified baseline 713 passed, 7 skipped; added isolated local Ollama provider and mocked tests. New tests and live provider inference pending. No engine changes. |
 | 2026-11-26 | Owner passed Windows launcher check-only on D:; measured 95.21 s model load and 4.44 s generation. Added Windows launcher regression; automated execution and native tests pending. Next: local regression and baseline suite. |
 | 2026-11-26 | Owner verified Ollama structured inference and dependency health; implemented portable Windows launcher storage root/check-only mode and README usage. No PowerShell or native runtime tests performed remotely; local verification pending. |

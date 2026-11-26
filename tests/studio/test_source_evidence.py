@@ -166,3 +166,39 @@ def test_source_snapshot_not_changed_by_caller(csir):
     csir["tracks"][0]["muted"] = True
     result = analyzer.propose_track(FakeAgent(), "character-track")
     assert result.decision.status == "proposed"
+
+
+@pytest.mark.parametrize("section_type", ["camera.transform", "animation.section"])
+def test_camera_transform_uses_source_curve_evidence(csir, section_type):
+    track = csir["tracks"][1]
+    track["ced_type"] = "camera.transform"
+    track["binding_entity_id"] = "camera"
+    track["sections"][0]["ced_type"] = section_type
+    agent = FakeAgent()
+    result = SourceEvidence(csir, MappingResources()).propose_track(agent, "prop-track")
+    assert result.decision.status == "proposed"
+    assert result.decision.mapping_id == "transform"
+    assert "MISSING_TARGET_MAPPING" in result.source_alerts
+    assert len(agent.calls) == 1
+
+
+@pytest.mark.parametrize("change", ["wrong_binding", "missing_keys", "fov_only", "wrong_section"])
+def test_camera_transform_withholds_without_matching_evidence(csir, change):
+    track = csir["tracks"][1]
+    track["ced_type"] = "camera.transform"
+    track["binding_entity_id"] = "camera"
+    section = track["sections"][0]
+    section["ced_type"] = "camera.transform"
+    if change == "wrong_binding":
+        track["binding_entity_id"] = "prop"
+    elif change == "missing_keys":
+        section["payload"]["animation"]["curves"][0]["keys"] = []
+    elif change == "fov_only":
+        section["payload"]["animation"]["curves"][0]["canonical_semantic"] = "camera.fov"
+    else:
+        section["ced_type"] = "camera.cut"
+    agent = FakeAgent()
+    result = SourceEvidence(csir, MappingResources()).propose_track(agent, "prop-track")
+    assert result.decision.status == "failed"
+    assert result.decision.mapping_id is None
+    assert not agent.calls

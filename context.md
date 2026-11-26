@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Ollama provider unit tests and lint passed
+
+- Owner reports Ruff checks passed and `!6 passed` (interpreted as 16 passed, consistent with the 16 parametrized provider test cases). No live provider inference output supplied yet. Previous full regression baseline remains 713 passed, 7 skipped before the new provider tests; do not imply the full suite was rerun.
+- Next: run the constrained mapping-ID live smoke against the existing local Qwen 2.5 model, capture two consecutive requests with cold/warm timings and unload only if no other application is using the model. After validating the live provider, proceed to the single LangGraph agent foundation. No new dependencies, model downloads, engine changes, or native tests in this checkpoint.
+
 ### 2026-11-26 — Ollama provider lint fixes
 
 - Owner's Ruff 0.17.6 check reported TRY004 (non-object model output raised ValueError instead of TypeError) and I001 (extra blank line after imports in provider test). Fixed both in 5cbbad1 and 4a227da; existing exception handler already catches TypeError and still raises OllamaError for invalid model output. No change to inference or transfer behavior.
@@ -261,6 +266,7 @@ Keep this concise and newest-first. For every change add date, summary, affected
 
 | Date | Change / evidence |
 | --- | --- |
+| 2026-11-26 | Owner reports provider lint and unit tests passed (16 inferred from reported typo); live smoke pending. Documentation only. |
 | 2026-11-26 | Fixed provider TRY004 and test I001 from owner's Ruff output; rerun pending. No native or live provider tests performed. |
 | 2026-11-26 | Owner verified baseline 713 passed, 7 skipped; added isolated local Ollama provider and mocked tests. New tests and live provider inference pending. No engine changes. |
 | 2026-11-26 | Owner passed Windows launcher check-only on D:; measured 95.21 s model load and 4.44 s generation. Added Windows launcher regression; automated execution and native tests pending. Next: local regression and baseline suite. |

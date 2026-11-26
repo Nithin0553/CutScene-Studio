@@ -79,3 +79,15 @@ def test_blocked_feature_does_not_invoke_agent(resources):
     assert result.decision.status == "unsupported"
     assert result.evidence.capability_state == "KNOWN_PARTIAL"
     assert result.decision.mapping_id is None
+
+
+def test_ambiguous_feature_requires_more_evidence(resources):
+    class FakeAgent:
+        def select_mapping(self, feature, candidates):
+            pytest.fail("Ambiguous features require source binding evidence")
+
+    result = resources.propose(FakeAgent(), "animation.track", "track")
+    assert result.decision.status == "failed"
+    assert result.decision.mapping_id is None
+    assert "source binding" in result.decision.reason
+    assert len(result.evidence.candidates) == 2

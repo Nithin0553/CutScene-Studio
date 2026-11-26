@@ -83,12 +83,19 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
-### 2026-11-26 — Storage check passed; model load bottleneck confirmed
+### 2026-11-26 — Deterministic regression baseline passed; local Ollama provider added
+
+- Owner ran tests on Windows/Python 3.12.10 at 5d576f5: pip installed pytest 8.4.2 and Ruff 0.17.6 into existing D: .venv-studio after a transient network reset; pip check found no broken requirements. Targeted Windows storage test: 1 passed in 1.60 s. Full suite: 713 passed, 7 skipped in 120.75 s. Skip reasons not yet reported. No native Unity/Unreal certification implied.
+- Added packages/studio/ollama_provider.py (abfb02d): direct loopback HTTP only, configurable model/timeout/context/output/keep-alive, model listing, nonstreaming structured generation with local JSON schema validation, inference timings and explicit unload. Defaults to existing qwen2.5:7b-instruct, 2048 context, 256 output tokens, 240 s timeout and 2m keep-alive. Rejects nonlocal endpoints, HTTP/transport errors, truncated or invalid output. No engine changes or agent tool execution; schemas are trusted application-defined contracts, and semantic mapping checks remain required. Uses Python stdlib and existing jsonschema dependency; no agent SDK installed yet.
+- Added tests/studio/test_ollama_provider.py (cd04240): mock transport tests covering schema enforcement, model listing, timings, failure modes, endpoint restrictions and unload. New tests not yet run; remote service does not have access to owner's Windows/Ollama/engine runtime. Existing regression suite result is from before provider addition.
+- Next: owner fetch/fast-forward, run targeted provider tests and Ruff on new files using existing D: virtual environment and D: temporary paths. Then run live local provider smoke with constrained mapping-ID enum and explicit unsupported fallback, record cold/warm timings, unload only when Ollama is idle except for our session. Run full regression after provider changes. Before editor integration, confirm engine versions, editor bootstrap and actual D: cache/workspace use. LangGraph integration, mapping retrieval and repair remain pending.
+
+### 2026-11-26 — Storage check passed; model load bottleneck confirmed (prior checkpoint)
 
 - Owner ran the Windows launcher with -StorageRoot and -CheckOnly successfully. Reported repository, storage root, run workspace, Python executable, HF_HOME, npm_config_cache, PIP_CACHE_DIR, TEMP, TMP and UPM_CACHE_ROOT are all on D:. Studio was not started. This verifies launcher configuration and prerequisites, not actual native runtime writes or Unreal cache redirection.
 - From the previous Ollama request: load 95.21 s, prompt evaluation 0.89 s, generation 4.44 s, total 102.37 s (remaining overhead 1.83 s). Model loading accounts for approximately 93% of total latency. Keep the existing Qwen 2.5 7B model. For the proposed agent, reuse a loaded model within bounded active transfer sessions (short configurable keep_alive) and release it when idle or on transfer completion; measure warm latency and memory pressure before tuning. No new model download is needed. Tool-calling and grounded decision quality are still unverified.
 - Added tests/studio/test_windows_storage_launcher.py (4845d8a), a Windows integration regression invoking the real launcher in check-only mode with a temporary path containing spaces and asserting all reported paths and created directories. Skips on non-Windows or if the required installed Studio virtual environment/PowerShell is absent. New automated test not yet executed; owner manual launcher check passed.
-- Next: fast-forward the existing feature branch, configure D: cache/temp variables in the current PowerShell session, install only the missing pytest/Ruff test dependencies into the existing D: virtual environment, and run the targeted launcher regression followed by the existing test suite, using a unique D: pytest basetemp. Do not install agent dependencies or launch native engines yet. Verify engine versions and existing Unreal bootstrap/cache paths before live backend/worker workspace checks. Preserve the 15 untracked Unity metadata files and historical runs.
+- Owner completed the test dependency installation and baseline regression; see newest checkpoint above. Do not install agent dependencies or launch native engines yet. Verify engine versions and existing Unreal bootstrap/cache paths before live backend/worker workspace checks. Preserve the 15 untracked Unity metadata files and historical runs.
 
 ### 2026-11-26 — Ollama smoke test and first storage implementation (prior checkpoint)
 
@@ -249,6 +256,7 @@ Keep this concise and newest-first. For every change add date, summary, affected
 
 | Date | Change / evidence |
 | --- | --- |
+| 2026-11-26 | Owner verified baseline 713 passed, 7 skipped; added isolated local Ollama provider and mocked tests. New tests and live provider inference pending. No engine changes. |
 | 2026-11-26 | Owner passed Windows launcher check-only on D:; measured 95.21 s model load and 4.44 s generation. Added Windows launcher regression; automated execution and native tests pending. Next: local regression and baseline suite. |
 | 2026-11-26 | Owner verified Ollama structured inference and dependency health; implemented portable Windows launcher storage root/check-only mode and README usage. No PowerShell or native runtime tests performed remotely; local verification pending. |
 | 2026-11-26 | Owner confirmed feature branch synchronization and hardware/Ollama/venv configuration. Inspected existing backend and worker workspace overrides and identified launcher configuration gap. Reuse Qwen 2.5 7B and D: model storage; inference, dependency and native checks pending. Documentation only. |

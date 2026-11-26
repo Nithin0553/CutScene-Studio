@@ -92,6 +92,16 @@ class SourceEvidence:
             and all(section["ced_type"] == "camera.cut" for section in sections)
         ):
             return "camera_cut"
+        if feature == "camera.transform":
+            if binding_type != "entity.camera":
+                return None
+            if all(
+                section["ced_type"] in {"camera.transform", "animation.section"}
+                and _has_transform_keys(section)
+                for section in sections
+            ):
+                return "transform"
+            return None
         if feature != "animation.track":
             return None
         if not all(section["ced_type"] == "animation.section" for section in sections):

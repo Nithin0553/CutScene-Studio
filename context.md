@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Source evidence tests passed; lint correction
+
+- Owner ran 51 targeted source evidence, mapping resources, agent and provider tests: 51 passed in 3.70 s. Ruff on source evidence and mapping files reported two SIM102 diagnostics in source_evidence.py; no other diagnostics reported. Combined nested camera-cut and transform conditions without changing their semantics (3e59b5c). Corrected Ruff and pytest reruns still pending.
+- Next: safely fetch/fast-forward the active branch, rerun Ruff and targeted pytest using D: temporary storage, then locate an existing actual Unity CSIR export and test read-only source-bound mapping proposals. No actual exported CSIR path supplied yet. Native transfer, full regression since the AI additions, and scene-level analysis remain pending. No additional dependency/model installs or engine launches needed for this checkpoint.
+
 ### 2026-11-26 — Live CED retrieval passed; CSIR source evidence adapter added
 
 - Owner's actual resource smoke: camera.cut -> camera_cut proposed (50.5658926 s); camera.fov -> camera_fov proposed (2.0882545 s); animation.track withheld for ambiguity; audio.track withheld as KNOWN_PARTIAL; physics.collider withheld as KNOWN_UNSUPPORTED. All five expected outcomes, three cases made no inference call. Previous 39 targeted tests passed in 3.64 s before the lint correction; corrected Ruff/pytest rerun not explicitly reported. Native preflight still required.
@@ -292,6 +297,7 @@ Keep this concise and newest-first. For every change add date, summary, affected
 
 | Date | Change / evidence |
 | --- | --- |
+| 2026-11-26 | Owner passed 51 targeted tests; fixed two source evidence SIM102 lint diagnostics. Local rerun and real source export pending. |
 | 2026-11-26 | Owner confirmed all five live CED smoke outcomes; added source-bound primary action proposals and 12 synthetic CSIR tests. Local validation pending. |
 | 2026-11-26 | Owner passed all 39 targeted tests; fixed mapping resource TRY004. Local lint rerun and live CED smoke pending. |
 | 2026-11-26 | Owner passed 26 provider/agent tests and three live graph cases; added read-only strict CED mapping resource retrieval and ambiguity guard with 13 tests. Local verification pending. |

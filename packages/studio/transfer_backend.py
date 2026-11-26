@@ -936,6 +936,10 @@ def inspect_ai_handoff(
     from packages.studio.source_evidence import SourceEvidence
     from packages.studio.transfer_agent import MappingDecision
 
+    inputs = [Path(csir_path), Path(mapping_path), Path(analysis_path)]
+    if capture_path is not None:
+        inputs.append(Path(capture_path))
+    input_hashes = {path: _sha(path) for path in inputs}
     source = SourceEvidence(_load(Path(csir_path)), MappingResources())
     analysis = _load(Path(analysis_path))
     if (
@@ -1027,10 +1031,15 @@ def inspect_ai_handoff(
     plan, coverage, evidence = compose_files(
         csir_path, mapping_path, capture_path=capture_path,
     )
-    if source.source_sha256 != SourceEvidence(
-        _load(Path(csir_path)), MappingResources()
-    ).source_sha256:
-        raise TransferBackendError("Source changed during handoff inspection.")
+    if any(_sha(path) != digest for path, digest in input_hashes.items()):
+        raise TransferBackendError("An input changed during handoff inspection.")
+    if (
+        evidence["csir_sha256"] != input_hashes[Path(csir_path)]
+        or evidence["mapping_sha256"] != input_hashes[Path(mapping_path)]
+        or evidence["ced_sha256"] != source.resources.catalog["_sha256"]
+        or evidence["ced_adapter_capabilities_sha256"] != source.resources.capabilities_sha256
+    ):
+        raise TransferBackendError("Backend input evidence differs from source analysis.")
     dispatch = {
         row["source_location"]: row
         for row in coverage["feature_dispatch"]["source_occurrences"]
@@ -1056,7 +1065,7 @@ def inspect_ai_handoff(
         "kind": "cutsceneai.ai_handoff_inspection",
         "version": "0.1.0",
         "source_sha256": source.source_sha256,
-        "analysis_sha256": _sha(Path(analysis_path)),
+        "analysis_sha256": input_hashes[Path(analysis_path)],
         "backend_evidence": evidence,
         "analysis_decision_counts": counts,
         "backend_actions": dict(Counter(action["kind"] for action in plan["actions"])),

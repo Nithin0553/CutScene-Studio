@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Handoff fixture correction after targeted regression
+
+- Owner ran targeted suite: 70 passed, 1 failed in 4.69 s. test_ai_handoff_uses_existing_backend stopped during exact report decision comparison, before deterministic planning. Inspection confirmed FakeAgent emitted 'Fixture proposal' while the real agent and replay verifier emit 'Selected from eligible mappings; native preflight still required.' The test fixture was inconsistent with the production report contract. No native/backend conversion failure established.
+- Corrected mock reason and strengthened six negative tests to require their intended rejection messages (20e1c6e). Previously those negative tests could pass due to the same invalid baseline fixture. No application logic, validation gates or actual analysis report changed. Rerun all 71 targeted tests and Ruff; then reuse the previously saved actual Benchmark001 report for inspect_ai_handoff. No Ollama call, source export or engine launch necessary. Corrected tests and actual backend handoff remain unverified.
+
 ### 2026-11-26 — Actual scene analysis report verified; backend handoff inspection added
 
 - Owner ran SourceEvidence.analyze_scene against the same Benchmark001 export and uploaded the generated report. Inspected the entire JSON: COMPLETE, seven active tracks, five proposed and two correctly withheld, no failed/unanalysed tracks, provider_failed false, execution_authorized false; all nested source digests, track IDs and resource hashes consistent, selected IDs match narrowed eligibility. CED findings 246 (179 partial, 7 missing target mappings, 60 supported-unverified), 186 active alerts, 11 review groups, zero unknown discoveries. Partial groups: animation.bone_curve 123, animation.offset 45, animation.root_motion 7, audio.track 1, audio.section 1, event.trigger 2. No native conversion or target fidelity inferred. Report remains outside Git on D:. Five report tests and Ruff rerun not explicitly reported.

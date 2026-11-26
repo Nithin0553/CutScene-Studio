@@ -15,7 +15,7 @@ from jsonschema import Draft202012Validator
 
 from packages.studio import ced_preflight
 from packages.studio.mapping_resources import MappingEvidence, MappingResources
-from packages.studio.transfer_agent import MappingDecision, TransferAgent
+from packages.studio.transfer_agent import MappingCandidate, MappingDecision, TransferAgent
 
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / "contracts/csir/csir-v0.1.schema.json"
 _TRANSFORM_CHANNELS = {
@@ -143,7 +143,7 @@ class SourceEvidence:
         evidence = self.resources.retrieve(feature, "track")
         binding = self.entities.get(track.get("binding_entity_id"), {})
         binding_type = binding.get("ced_type")
-        eligible = ()
+        eligible: tuple[MappingCandidate, ...] = ()
         if track.get("muted") or not track["sections"]:
             decision = MappingDecision("unsupported", None, "Inactive source track.")
         elif not evidence.candidates:
@@ -163,7 +163,6 @@ class SourceEvidence:
             self.source_sha256, track_id, binding_type, evidence, alerts, decision,
             tuple(item.mapping_id for item in eligible),
         )
-
 
     def analyze_scene(self, agent: TransferAgent) -> dict[str, Any]:
         """Collect one read-only report, retaining every track and CED finding.

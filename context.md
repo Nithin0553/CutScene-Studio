@@ -1,6 +1,6 @@
 # CutScene Studio — Living Development Context
 
-Last updated: 2026-11-24. This is the canonical handoff for the **new standalone repository**, not the earlier AI-agent research Studio.
+Last updated: 2026-11-26. This is the canonical handoff for the **new standalone repository**, not the earlier AI-agent research Studio.
 
 ## 1. Start here in every new chat
 
@@ -15,7 +15,7 @@ Resume prompt: "Read context.md and AGENTS.md from Nithin0553/CutScene-Studio on
 ## 2. Repository and release state
 
 - Repository: https://github.com/Nithin0553/CutScene-Studio (public; no declared open-source license).
-- Active integration branch: `feature/deterministic-studio-v1`. Default branch `main` still contains only the initial README as of this handoff; do not tell users to clone main for the working Studio.
+- Active integration branch: `feature/deterministic-studio-v1`. Default branch `main` contains initial project documentation, not the working Studio; do not tell users to clone main for the working Studio.
 - Draft PR [#1](https://github.com/Nithin0553/CutScene-Studio/pull/1), targeting main. Do not merge or publish a certified release without owner approval and the acceptance evidence below.
 - Original repository: `Nithin0553/CutsceneAI`; historical only. Do not change it while working on the standalone Studio.
 - Exact pre-agent baseline in original repository: `3b3ef7071e4e23efefa4d1ac6c7dee3c26738153`. Selected deterministic improvements also sourced from original main snapshot `28c63e5c1eb65f499f21508b9491d7f0e9b88a5b`.
@@ -23,11 +23,74 @@ Resume prompt: "Read context.md and AGENTS.md from Nithin0553/CutScene-Studio on
 
 ## 3. Product direction and constraints
 
-Build a simple, solid, local Unity Timeline to Unreal Level Sequence transfer Studio. Keep the default transfer deterministic: no AI agents, LangGraph, LLMs, API keys, cloud calls, or learning/dataset collection in the critical path. Historic standalone research tools and evidence are retained but are not part of the default workflow. Do not revive the old AI-agent architecture without explicit owner direction.
+Build a reliable local Unity Timeline to Unreal Level Sequence transfer Studio. On 2026-11-26 the owner explicitly approved the single-agent Ollama + LangGraph architecture below, superseding the previous no-agent product direction. Preserve the existing deterministic execution backend as the foundation and regression baseline; no cloud API or learning/dataset collection is required. The current implementation remains deterministic until the approved integration is implemented and verified.
 
 First release is scoped to the cinematic elements of Benchmark 001 and 002. Avoid benchmark-name-specific logic, assumptions about scene names, or fixed private paths. Use the source as authoritative. Keep the UI clean, minimal and responsive with meaningful progress animation. Do not emit unnecessary files, commit generated artifacts, overwrite existing target sequences, or restart engines repeatedly. Explicit editor approval, source asset-copy rights, backed-up target projects and guarded native execution remain required.
 
-## 4. Architecture and implementation map
+### Approved target architecture (mandatory; not yet integrated)
+
+Approved by the user on 2026-11-26 from the supplied "Proposed CutSceneAI architecture" diagram. This is the sole architectural baseline for CutScene Studio. Do not introduce alternative architectures, additional agents, or change component responsibilities or connections without explicit user approval.
+
+```mermaid
+flowchart TD
+    UI["CutSceneAI Studio<br/>Connect engines · Start transfer"]
+    subgraph AG["Single AI Transfer Agent"]
+        LLM["Ollama + Local LLM<br/>Analyze · Reason · Plan · Repair"]
+        ORCH["LangGraph / Python orchestration<br/>Controlled tool execution"]
+        LLM --- ORCH
+    end
+    M["Mapping resources<br/>RAG / retrieval"]
+    C["CSIR + CED<br/>Conversion rules"]
+    V["CineTwin<br/>Validation"]
+    B["Deterministic Transfer Backend<br/>Validate and execute transfer plan"]
+    U["Unity Editor Bridge<br/>C# Editor APIs"]
+    E["Unreal Editor Worker<br/>Python / native APIs"]
+    UNITY["Unity Engine<br/>Timeline · Scene<br/>Source cutscene"]
+    UNREAL["Unreal Engine<br/>Sequencer · Level<br/>Reconstructed cutscene"]
+    UI --> AG
+    AG --> M
+    AG --> C
+    AG --> V
+    M --> B
+    C --> B
+    V --> B
+    B --> U
+    B --> E
+    U --> UNITY
+    E --> UNREAL
+    UNITY --> UNREAL
+```
+
+### Component responsibilities and interfaces
+
+- **CutSceneAI Studio:** the user-facing interface for connecting engines and starting transfers; displays progress, diagnostics and validation results.
+- **Single AI Transfer Agent:** the only AI agent. Ollama + a local LLM provide analysis, reasoning, planning and repair decisions. LangGraph / Python orchestrates controlled tool execution. Use a configurable local Ollama API (default http://localhost:11434); model choice is pending hardware and capability verification.
+- **Mapping resources:** RAG / retrieval of relevant engine conversion knowledge, preferring exact component and version matches before optional semantic retrieval. Inspect prior mappings before reusing them.
+- **CSIR + CED:** engine-independent cutscene representation and conversion rules/coverage. Source census can support extraction and coverage within these existing responsibilities; it is not an additional architectural layer.
+- **CineTwin:** source-to-target validation and discrepancy evidence for bounded repair; validation feedback returns to the same single agent through controlled tools.
+- **Deterministic Transfer Backend:** validates and executes the transfer plan using explicit conversion algorithms, schemas, job state and engine adapters. The three knowledge/validation components inform backend execution as shown in the approved diagram.
+- **Unity Editor Bridge:** C# Editor APIs connect to Unity Engine and extract Timeline, scene, source cutscene, assets and capabilities.
+- **Unreal Editor Worker:** Python / native APIs connect to Unreal Engine, import assets, create actors, reconstruct the Sequencer and Level, and obtain target readback.
+- **Unity Engine → Unreal Engine:** the initial transfer direction. Unity contains the source cutscene; Unreal contains the reconstructed cutscene. The arrow denotes the transfer outcome, not an unmediated engine-to-engine API bypass.
+
+### Non-negotiable implementation constraints
+
+- Keep one Ollama-powered AI agent with LangGraph / Python orchestration. Do not substitute a multi-agent design, another orchestration architecture, or a parallel transfer pipeline without explicit approval.
+- The agent selects grounded conversion strategies, invokes allowlisted tools and proposes supported repairs. Deterministic calculations, conversion, validation and editor mutations remain in the backend and engine adapters.
+- Validate tool arguments and transfer plans, retain provenance, bound repair attempts, and explicitly report unsupported or partial conversions. Avoid arbitrary generated code execution and unintended changes to source projects.
+- Preserve the diagram's named components and topology. Implementation details may evolve within their responsibilities; architectural changes require explicit user approval and a context.md update.
+- Existing deterministic components on this feature branch must be inspected and reused where suitable; the Ollama/LangGraph integration is not yet verified.
+- No runtime implementation or real-engine transfer test is implied by architecture approval.
+
+
+### Local setup checkpoint (2026-11-26)
+
+- Owner confirmed the correct existing clone on D: (Dimpu), with 1,529.80 GB free, local HEAD 9245e5b on feature/deterministic-studio-v1, and an existing .venv-studio. The machine-specific workspace path is recorded in [main context](https://github.com/Nithin0553/CutScene-Studio/blob/main/context.md). Do not clone again or switch to main.
+- User's git fetch showed origin/feature/deterministic-studio-v1 at fc2682b, three commits ahead. GitHub comparison confirms those commits only changed AGENTS.md, CONTRIBUTING.md, README.md and context.md; preserve all 15 untracked Unity .meta files. Re-fetch before a fast-forward, inspect incoming added paths for collisions, do not clean/reset/stash/delete metadata blindly.
+- D: is mandatory for project-owned files, models, dependencies, engine projects, assets, runs, logs, caches and temporary files. Existing default run storage under ~/.cutscene-studio/runs is a migration blocker; inspect configuration and redirect backend and Unreal worker consistently before launch. Preserve existing native evidence. Windows/tool system settings may still reside on C:.
+- Next: safely fast-forward the active feature branch, inspect existing tooling, Ollama models, RAM/GPU and existing model storage, then audit reusable components and run baseline checks with D: storage configured before implementing the approved agent. No new code or native tests performed in this session. Historical B001/B002 evidence and open acceptance tasks below remain relevant; they do not certify the new AI architecture.
+
+## 4. Architecture and implementation map (existing deterministic baseline)
 
 ```text
 Unity Timeline + PlayableDirector
@@ -106,7 +169,7 @@ Authoritative references: [Benchmark 001](docs/benchmarks/BENCHMARK_001.md), [Be
 - Inspect generated actors/assets, hierarchy, root trajectories and orientations, camera identities/cuts/framing/lens, timing, blend/section behavior, light/material/audio/event behavior. Report unsupported features and quantization explicitly. Save/reopen Unreal level and sequence and verify persistence. Preserve original source and targets.
 - Generated sequence alone does not equal verified cinematic fidelity; require source-bound readback and measured acceptance evidence. Arbitrary skeleton retargeting, scripts/shaders, VFX, physics/gameplay and broad unsupported combinations are outside the first-release promise.
 
-## 8. Next work (ordered by current state)
+## 8. Prior deterministic acceptance work (retain as baseline; current setup checkpoint above takes precedence)
 
 1. Continue the owner's native Benchmark 001 test from the generated sequence. Collect Studio Results, run/job ID, native receipts/readback, output log and Unity/Unreal comparisons. Inspect actors and camera view in the dark level; distinguish missing environment light from failed transfer before modifying anything. A Basic/Open World map may be useful for separate visual testing, not as unreported benchmark evidence.
 2. Diagnose any actual fidelity gaps, implement general deterministic fixes with regression tests, push and re-test native B001 including save/reopen.
@@ -165,6 +228,7 @@ Keep this concise and newest-first. For every change add date, summary, affected
 
 | Date | Change / evidence |
 | --- | --- |
+| 2026-11-26 | Owner approved single-agent Ollama/LangGraph target and D: storage, confirmed existing local feature branch and untracked Unity metadata. Reconciled context/AGENTS direction with approved architecture; no implementation or tests run. Next: safe fast-forward, environment and storage verification. |
 | 2026-11-24 | Literature/model feasibility review recorded in section 8: direct scene converters vs learned 2D level translation vs trainable mapping/retargeting candidates. Verified prior handoff a2a9338 push/PR CI success. Research recommendation only; no model downloads, inference, training, engine tests or production changes. Next research step: isolated upstream reproduction and paired target-label design if approved. |
 | 2026-11-24 | Resumed from 3702f93; verified draft PR #1 remains open targeting unchanged main and both push/PR CI passed. Inspected Results/job/readback implementation; documented read-only B001 evidence collection and black-viewport isolation in section 8. Documentation only; no new local or native tests run. Next: owner supplies matching B001 run evidence before conversion changes. |
 | 2026-11-24 | Created living context and AGENTS.md, linked from README, corrected clone command and obsolete contribution instructions. Documentation-only; no engine code changed. |

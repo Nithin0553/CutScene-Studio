@@ -83,6 +83,13 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Actual Benchmark001 mapping proposals passed; scene analysis report added
+
+- Owner freed resources: available RAM 4.08 GB (previous 1.33), GPU use 1061/4096 MiB (previous 3828). Samples were at different model loading states; no causal diagnosis of earlier HTTP 500 established. Same actual CSIR canonical digest 2324a760d692db16b894545b3840ca599748f9e22c2699aa6c1b48ac964f7c1b; seven tracks analyzed, five proposed, zero failed, two correctly withheld. CHARACTER_Animation -> skeletal_animation (49.7850145 s), MOVING_PROP_Movement -> transform (8.8468378 s), CAM_A_Cut -> camera_cut (1.7745519 s), CAM_B_Cut -> camera_cut (1.4608272 s), CAM_B_Animation -> transform (1.5850106 s); AUDIO_Main and EVENT_Main withheld as KNOWN_PARTIAL. No engine changes. CED still REVIEW_REQUIRED (179 partial, 7 missing target mappings, 60 supported-unverified, 186 active alerts). This is real source proposal validation, not complete conversion/fidelity.
+- Owner ran all 59 targeted tests (3.50 s, no failures) and Ruff across the four AI modules/tests: all checks passed. Previous complete regression 764 passed / 7 external evidence skips before the last eight tests; full regression after newer changes not yet run. Draft PR #1 open; no PR workflow runs returned for prior head.
+- Added SourceEvidence.analyze_scene(agent) in packages/studio/source_evidence.py (bb91042, fb8cb4e): one JSON-compatible read-only source analysis report with canonical source digest, resource hashes, source entity/asset/track counts, track names/IDs/activity, proposal results, narrowed eligible mapping IDs, all CED audit findings and decision counts. Sequential calls reuse the existing single agent. Stops following a provider failure, retaining every remaining track as not_analyzed and the entire audit, rather than repeatedly calling an unhealthy model. COMPLETE indicates traversal completed only; execution_authorized always false. No new agent, no destination mutation, no change to strict partial policy. Added five synthetic regression cases (4318873): complete accounting, provider failure, source evidence failure, empty tracks, detached audit. Expected targeted total 64; these new tests have not run yet.
+- Next: fetch/fast-forward, test new report and Ruff, run analyze_scene against the same original export and save JSON locally under D: runs (never commit it). Verify five primary proposals, two withheld, all 246 CED findings preserved, no execution authorization. Then inspect and integrate the report with existing deterministic candidate preparation/preflight; do not build an independent execution pipeline. Native target mappings, partial feature support (including audio/events and FOV/bone/offset fidelity), full regression and actual engine acceptance remain outstanding. No engine launch required for this checkpoint.
+
 ### 2026-11-26 — Ollama direct generation recovered; memory pressure observed
 
 - Owner reproduced matching structured request directly via /api/generate successfully (HTTP 200, skeletal_animation, done true/stop). Total 53.7977143 s, load 50.5728886 s, prompt 0.7243432 s, generation 1.8411929 s. Server log reports runner startup ~46.4 s, 13/29 layers offloaded to GPU, 2048 context, CUDA model buffer 1745.80 MiB, compute 730.36 MiB. Model storage remains on D:.
@@ -328,6 +335,7 @@ Keep this concise and newest-first. For every change add date, summary, affected
 
 | Date | Change / evidence |
 | --- | --- |
+| 2026-11-26 | Actual Benchmark001 proposals passed 5/5, 2 correctly withheld; 59 tests and Ruff passed. Added scene analysis report and five tests; local validation pending. |
 | 2026-11-26 | Full regression 764 passed, 7 external Stage 4 skips; actual Benchmark001 read-only analysis revealed provider failures and camera.transform gap. Added camera route and diagnostics; local rerun pending. |
 | 2026-11-26 | Owner located original Benchmark001 Unity export directory on D:; explicit snapshot selection and read-only live source analysis pending. |
 | 2026-11-26 | Corrected 51 targeted tests passed; workspace search found only schemas and test fixtures. Locate actual Unity project export. |

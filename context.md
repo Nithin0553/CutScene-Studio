@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Isolated Ollama generation HTTP 500
+
+- Owner confirmed /api/tags works and qwen2.5:7b-instruct (4.7 GB, ID 845dbda0ea48) is installed; ollama ps empty (normal idle). Independent structured generation via OllamaProvider failed with HTTP 500 at /api/generate, underlying cause None (HTTP response, not a chained Python transport exception). This reproduces the inference failure outside CSIR and LangGraph. Exact server cause remains unknown; current provider does not expose response body for non-200 responses.
+- Next: reproduce with a direct local HTTP request matching provider model/options/schema and capture HTTP status/error body; inspect server logs and only then select a targeted remediation. Keep original models, D: storage and engine projects intact. Do not reinstall or redownload without evidence. No code changes in this checkpoint. Updated 59 tests, Ruff and actual Benchmark001 rerun remain pending.
+
 ### 2026-11-26 — Full regression passed; actual Benchmark001 analysis exposed runtime gaps
 
 - Owner ran full pytest: 764 passed, 7 skipped in 125.74 s; all seven skips are tests/test_studio_audit_stage4_layout.py:30 because original external Stage 4 evidence fixtures are unavailable. No failures. The earlier 51 targeted tests passed after lint changes; corrected Ruff result still not explicitly supplied. This is software regression, not native fidelity.

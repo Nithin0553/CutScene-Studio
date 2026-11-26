@@ -109,8 +109,8 @@ class TransferAgent:
         )
         try:
             result = self.provider.generate(prompt, schema)
-        except OllamaError:
-            return {"failure": "Local model inference failed."}
+        except OllamaError as exc:
+            return {"failure": f"Local model inference failed: {exc}"}
         proposed = result.data.get("mapping_id")
         return {
             "proposed_id": proposed if isinstance(proposed, str) else None,

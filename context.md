@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Backend lint and expanded targeted regression passed
+
+- Owner confirmed corrected Ruff checks all passed and expanded targeted pytest suite 97 passed in 2.13 s (71 AI-related tests plus 26 existing deterministic backend tests). No failures. This validates the synthetic handoff cases and existing backend regression after lint cleanup, not actual target fidelity.
+- Next unresolved step: run inspect_ai_handoff on the original selected Benchmark001 CSIR, saved scene analysis report and existing example destination mapping. Reuse the saved report without inference; inspect source-specific action attribution, backend ledger and CED findings. Example destination paths are not verified native targets. Full regression after the latest changes, immutable candidate integration and native execution remain pending. No application code changed in this checkpoint.
+
 ### 2026-11-26 — All 71 targeted tests passed; backend lint cleanup
 
 - Owner confirmed 71 targeted tests passed in 2.05 s, including corrected positive handoff fixture and six specific rejection cases. Ruff reported four findings in transfer_backend.py: I001 import ordering, two RUF046 redundant int(math.floor(...)) conversions, and SIM102 nested fallback condition. No lint findings in the two other checked files.

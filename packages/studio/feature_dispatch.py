@@ -483,8 +483,16 @@ def audit(csir: Mapping[str, Any], plan: Mapping[str, Any] | None = None, *,
     # make every same-CED source feature appear planned.
     attributed_actions: dict[str, set[str]] = {}
     executed_adapters: set[tuple[str, str, str]] = set()
+    observed = _source_rows(csir)
+    track_ids = Counter(
+        row["source_id"] for row in observed if row["kind"] == "tracks" and row["source_id"]
+    )
+    track_locations = {
+        row["source_id"]: row["source_location"]
+        for row in observed if row["kind"] == "tracks" and track_ids[row["source_id"]] == 1
+    }
     name_counts = Counter(
-        (row["kind"], row["source_name"]) for row in _source_rows(csir)
+        (row["kind"], row["source_name"]) for row in observed
         if row["kind"] in {"tracks", "entities"} and row["source_name"]
     )
     for action in actions:
@@ -499,11 +507,16 @@ def audit(csir: Mapping[str, Any], plan: Mapping[str, Any] | None = None, *,
                     executed_adapters.add((location, str(action["adapter_name"]),
                                            str(action["adapter_version"])))
             continue
+        track_id = action.get("source_track_id")
+        if isinstance(track_id, str) and track_id in track_locations:
+            attributed_actions.setdefault(track_locations[track_id], set()).add(kind)
         for source_kind, key in (("entities", "entity_name"), ("tracks", "track_name")):
+            # Explicit track provenance takes priority over legacy name matching.
+            if source_kind == "tracks" and "source_track_id" in action:
+                continue
             name = str(action.get(key) or "")
             if name and name_counts[(source_kind, name)] == 1:
                 attributed_actions.setdefault(source_kind + ":" + name, set()).add(kind)
-    observed = _source_rows(csir)
     rows = []
     for item in observed:
         semantic = item["ced"]

@@ -17,18 +17,18 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-import csir_plan
-import sampling_plan
-import scene_prep
-import hierarchy_local
-import source_parent_resolution
-import ced_preflight
-import root_world_lock
-import feature_dispatch
-import visual_activation
-import source_surface_gap
 import adaptive_components
+import ced_preflight
+import csir_plan
+import feature_dispatch
+import hierarchy_local
+import root_world_lock
+import sampling_plan
 import scalar_property_adapter
+import scene_prep
+import source_parent_resolution
+import source_surface_gap
+import visual_activation
 
 NATIVE_GAPS = {
     "event.trigger": "Preserves event timestamp/identity as a marked frame, NOT executable payload.",
@@ -197,7 +197,7 @@ def _world_keys(
         round(float(sample["time_seconds"]), 8): sample
         for sample in samples
     }
-    count = int(math.floor((end - start) * hz + 1e-7))
+    count = math.floor((end - start) * hz + 1e-7)
     last_rpy = None
     result = []
     for frame in range(count):
@@ -252,7 +252,7 @@ def _scalar_bake_keys(
         for s in capture["samples"]
     }
     result = []
-    for frame in range(int(math.floor((end - start) * hz + 1e-7))):
+    for frame in range(math.floor((end - start) * hz + 1e-7)):
         moment = start + frame / hz
         sample = by_time.get(round(moment, 8))
         if sample is None:
@@ -446,15 +446,19 @@ def compose(
                 ) from exc
             except (ValueError, KeyError, TypeError, IndexError, ZeroDivisionError) as exc:
                 reasons.append(f"Native converter cannot represent track: {type(exc).__name__}: {exc}")
-        if status == "SKIPPED" and capture is not None and entity is not None:
-            if (entity.get("name") in mapping.get("entities", {})
-                and entity.get("ced_type") != "entity.audio_source"):
-                by_entity_bake.setdefault(str(entity["entity_id"]), []).append(index)
-                status = "BAKED_PARTIAL"
-                reasons.append(
-                    "Fallback: evaluated actor world transforms only; no "
-                    "skeletal joint equivalence, custom property, script or physics guarantee."
-                )
+        if (
+            status == "SKIPPED"
+            and capture is not None
+            and entity is not None
+            and entity.get("name") in mapping.get("entities", {})
+            and entity.get("ced_type") != "entity.audio_source"
+        ):
+            by_entity_bake.setdefault(str(entity["entity_id"]), []).append(index)
+            status = "BAKED_PARTIAL"
+            reasons.append(
+                "Fallback: evaluated actor world transforms only; no "
+                "skeletal joint equivalence, custom property, script or physics guarantee."
+            )
         if status in {"NATIVE_UNVERIFIED", "NATIVE_PARTIAL", "BAKED_PARTIAL"}:
             additions.extend(native_actions)
         ledger.append({

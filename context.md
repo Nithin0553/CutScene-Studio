@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — All 71 targeted tests passed; backend lint cleanup
+
+- Owner confirmed 71 targeted tests passed in 2.05 s, including corrected positive handoff fixture and six specific rejection cases. Ruff reported four findings in transfer_backend.py: I001 import ordering, two RUF046 redundant int(math.floor(...)) conversions, and SIM102 nested fallback condition. No lint findings in the two other checked files.
+- Corrected exactly these four findings (e6586c5). Alphabetized imports according to Ruff, removed redundant casts because math.floor of the floating-point frame count returns int, and combined nested fallback conditions preserving short-circuit evaluation and original branch behavior. No unsafe bulk autofix, changes to mapping rules, or relaxation of validation. Corrected code has not yet been run locally; rerun Ruff, targeted suite including existing backend tests, then actual read-only Benchmark001 handoff using existing report and example mapping. No fresh model inference or engine launch needed. Native transfer and full regression remain outstanding.
+
 ### 2026-11-26 — Handoff fixture correction after targeted regression
 
 - Owner ran targeted suite: 70 passed, 1 failed in 4.69 s. test_ai_handoff_uses_existing_backend stopped during exact report decision comparison, before deterministic planning. Inspection confirmed FakeAgent emitted 'Fixture proposal' while the real agent and replay verifier emit 'Selected from eligible mappings; native preflight still required.' The test fixture was inconsistent with the production report contract. No native/backend conversion failure established.

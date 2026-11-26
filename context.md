@@ -15,17 +15,60 @@ Last updated: 2026-11-26
 
 Build a reliable local AI-powered cross-engine cutscene transfer application, initially Unity Timeline to Unreal Engine Sequencer, with reverse direction as a future goal. The application should connect to both editors, inspect the source scene and timeline, transfer required assets, reconstruct the cutscene in the target, validate fidelity and attempt bounded repairs where supported.
 
-## 3. Proposed architecture (not yet implemented in this repository)
+## 3. Approved architecture (mandatory; not yet implemented in this repository)
 
-- Studio UI: engine connections, transfer configuration, progress, diagnostics and validation report.
-- Local backend: orchestration, schema validation, job state, deterministic transfer execution.
-- Ollama: local LLM inference via a configurable local API (default http://localhost:11434). Model selection is pending hardware and capability checks.
-- Single AI transfer agent: plans conversions, retrieves mapping knowledge, invokes allowlisted tools, interprets validation failures and proposes supported repairs. Consider LangGraph or a simpler state machine after reviewing requirements.
-- Mapping knowledge: exact component/version matching first; optional semantic retrieval/RAG for relevant conversion knowledge. Reuse prior project mappings where appropriate after inspecting them.
-- CSIR (engine-independent cutscene representation), source census, CED conversion knowledge/coverage, and CineTwin source-target comparison: concepts from the earlier research project to evaluate and port selectively, not existing features of this repository yet.
-- Unity Editor Bridge: source scene, Timeline, assets, animation and capability inspection using editor APIs.
-- Unreal Editor Worker: asset import, actor creation, Sequencer reconstruction and readback using editor APIs.
-- Deterministic conversion and validation must remain outside LLM calculations. Validate tool arguments and transfer plans, retain provenance, bound repair attempts, and explicitly report unsupported or partial conversions. Avoid arbitrary generated code execution and unintended changes to source projects.
+Approved by the user on 2026-11-26 from the supplied "Proposed CutSceneAI architecture" diagram. This is the sole architectural baseline for CutScene Studio. Do not introduce alternative architectures, additional agents, or change component responsibilities or connections without explicit user approval.
+
+```mermaid
+flowchart TD
+    UI["CutSceneAI Studio<br/>Connect engines · Start transfer"]
+    subgraph AG["Single AI Transfer Agent"]
+        LLM["Ollama + Local LLM<br/>Analyze · Reason · Plan · Repair"]
+        ORCH["LangGraph / Python orchestration<br/>Controlled tool execution"]
+        LLM --- ORCH
+    end
+    M["Mapping resources<br/>RAG / retrieval"]
+    C["CSIR + CED<br/>Conversion rules"]
+    V["CineTwin<br/>Validation"]
+    B["Deterministic Transfer Backend<br/>Validate and execute transfer plan"]
+    U["Unity Editor Bridge<br/>C# Editor APIs"]
+    E["Unreal Editor Worker<br/>Python / native APIs"]
+    UNITY["Unity Engine<br/>Timeline · Scene<br/>Source cutscene"]
+    UNREAL["Unreal Engine<br/>Sequencer · Level<br/>Reconstructed cutscene"]
+    UI --> AG
+    AG --> M
+    AG --> C
+    AG --> V
+    M --> B
+    C --> B
+    V --> B
+    B --> U
+    B --> E
+    U --> UNITY
+    E --> UNREAL
+    UNITY --> UNREAL
+```
+
+### Component responsibilities and interfaces
+
+- **CutSceneAI Studio:** the user-facing interface for connecting engines and starting transfers; displays progress, diagnostics and validation results.
+- **Single AI Transfer Agent:** the only AI agent. Ollama + a local LLM provide analysis, reasoning, planning and repair decisions. LangGraph / Python orchestrates controlled tool execution. Use a configurable local Ollama API (default http://localhost:11434); model choice is pending hardware and capability verification.
+- **Mapping resources:** RAG / retrieval of relevant engine conversion knowledge, preferring exact component and version matches before optional semantic retrieval. Inspect prior mappings before reusing them.
+- **CSIR + CED:** engine-independent cutscene representation and conversion rules/coverage. Source census can support extraction and coverage within these existing responsibilities; it is not an additional architectural layer.
+- **CineTwin:** source-to-target validation and discrepancy evidence for bounded repair; validation feedback returns to the same single agent through controlled tools.
+- **Deterministic Transfer Backend:** validates and executes the transfer plan using explicit conversion algorithms, schemas, job state and engine adapters. The three knowledge/validation components inform backend execution as shown in the approved diagram.
+- **Unity Editor Bridge:** C# Editor APIs connect to Unity Engine and extract Timeline, scene, source cutscene, assets and capabilities.
+- **Unreal Editor Worker:** Python / native APIs connect to Unreal Engine, import assets, create actors, reconstruct the Sequencer and Level, and obtain target readback.
+- **Unity Engine → Unreal Engine:** the initial transfer direction. Unity contains the source cutscene; Unreal contains the reconstructed cutscene. The arrow denotes the transfer outcome, not an unmediated engine-to-engine API bypass.
+
+### Non-negotiable implementation constraints
+
+- Keep one Ollama-powered AI agent with LangGraph / Python orchestration. Do not substitute a multi-agent design, another orchestration architecture, or a parallel transfer pipeline without explicit approval.
+- The agent selects grounded conversion strategies, invokes allowlisted tools and proposes supported repairs. Deterministic calculations, conversion, validation and editor mutations remain in the backend and engine adapters.
+- Validate tool arguments and transfer plans, retain provenance, bound repair attempts, and explicitly report unsupported or partial conversions. Avoid arbitrary generated code execution and unintended changes to source projects.
+- Preserve the diagram's named components and topology. Implementation details may evolve within their responsibilities; architectural changes require explicit user approval and a context.md update.
+- The prior research concepts are intended for review and selective porting; their implementation in this repository has not been verified.
+- No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 ## 4. Current repository state
 
@@ -43,7 +86,7 @@ Build a reliable local AI-powered cross-engine cutscene transfer application, in
 3. Implement minimal Unity and Unreal editor connectivity and capability discovery.
 4. Define source extraction, CSIR and mapping retrieval interfaces.
 5. Implement deterministic asset and timeline reconstruction for a minimal benchmark.
-6. Integrate the Ollama agent with typed tool calls and validated plans.
+6. Integrate the single Ollama agent using LangGraph / Python orchestration, typed tool calls and validated plans.
 7. Add target readback, CineTwin validation, bounded repair and transparent coverage reporting.
 8. Integrate Studio UI and run end-to-end real-engine benchmarks; expand supported features incrementally.
 9. Evaluate reverse transfer separately after the initial direction is reliable.
@@ -62,6 +105,14 @@ Get-CimInstance Win32_ComputerSystem | Select-Object TotalPhysicalMemory
 If nvidia-smi is unavailable, check the installed GPU using Windows tools. Confirm Unity/Unreal versions and available disk space before selecting a model and starting implementation. Review the older research repository before deciding which modules to port. No model downloads or local editor actions have been performed by this session.
 
 ## 7. Change history
+
+### 2026-11-26 — Approved architecture locked
+
+- User approved the exact supplied architecture diagram as the sole development baseline.
+- Replaced the tentative architecture section with the approved component topology, Mermaid diagram, responsibilities and mandatory constraints. LangGraph / Python orchestration is now required, not an undecided alternative.
+- Retained existing handoff rules, project state, roadmap and baseline history. No application code was changed.
+- Validation: documentation-only update; no software or real-editor tests run.
+- Next: verify local environment and review reusable research components, then implement within the approved architecture.
 
 ### 2026-11-26 — Project baseline and continuity
 

@@ -75,18 +75,18 @@ flowchart TD
 - Default branch: main.
 - Baseline inspection on 2026-11-26 found only README.md at the root; its description is "The newer and solid version of the Studio."
 - This context file establishes the development baseline and handoff workflow.
-- User reports Ollama is already installed locally. Installed models, GPU, RAM, available storage, engine versions and local project paths have not yet been verified.
+- User reports Ollama is already installed locally. Installed models, GPU, RAM, available storage and engine versions have not yet been verified. User reports an existing clone at `D:\My Studio\CutScene Studio\CutScene-Studio`; local Git status and remote remain unverified.
 - No application code, integration tests, or real engine transfer results have been verified in this repository as of this entry.
 - Prior research code and benchmarks must be reviewed explicitly before reuse. Do not assume prior implementations or results are present here.
 
 ## 4A. Mandatory local storage policy — D: (Dimpu)
 
-User explicitly requires D: for the entire project; do not intentionally place project files, models, virtual environments, downloads, assets, caches, logs, temporary files, exports, benchmarks, or engine projects on C:. The approved local workspace layout for initial setup is:
+User explicitly requires D: for the entire project; do not intentionally place project files, models, virtual environments, downloads, assets, caches, logs, temporary files, exports, benchmarks, or engine projects on C:. The local workspace layout uses the existing clone identified by the user (local Git state pending verification):
 
-- Root: `D:\CutScene-Studio`
-- Repository: `D:\CutScene-Studio\workspace`
-- Ollama models: `D:\CutScene-Studio\models\ollama`
-- Unity/Unreal projects: `D:\CutScene-Studio\engine-projects\Unity` and `D:\CutScene-Studio\engine-projects\Unreal`
+- Root: `D:\My Studio\CutScene Studio`
+- Repository: `D:\My Studio\CutScene Studio\CutScene-Studio`
+- Ollama models: `D:\My Studio\CutScene Studio\models\ollama`
+- Unity/Unreal projects: `D:\My Studio\CutScene Studio\engine-projects\Unity` and `D:\My Studio\CutScene Studio\engine-projects\Unreal`
 - Python virtual environment: repository `.venv` on D:; pip/npm/Unity/Unreal/Hugging Face caches under root `cache`
 - Assets, temporary files, logs, exports and backups: corresponding folders under root.
 
@@ -106,7 +106,7 @@ Configure OLLAMA_MODELS before any model pulls, preserve existing models by copy
 
 ## 6. Next actionable step
 
-First verify the D: volume and create the workspace described in section 4A. Clone the repository into its workspace directory; configure model/cache storage on D: before installing dependencies or downloading models. Verify existing tool locations and model paths, then select the model based on hardware. Do not move existing installations blindly.
+First verify the existing clone at `D:\My Studio\CutScene Studio\CutScene-Studio` using git remote -v, git branch --show-current, git status, and git log -5 --oneline. Do not clone again. After confirming the correct remote, fetch origin; only fast-forward main if the working tree is clean and the current branch is main. Configure model/cache storage on D: before installing dependencies or downloading models. Verify existing tool locations and model paths, then select the model based on hardware. Do not move existing installations blindly.
 
 Verify the developer machine using PowerShell:
 
@@ -120,6 +120,11 @@ Get-CimInstance Win32_ComputerSystem | Select-Object TotalPhysicalMemory
 If nvidia-smi is unavailable, check the installed GPU using Windows tools. Confirm Unity/Unreal versions and available disk space before selecting a model and starting implementation. Review the older research repository before deciding which modules to port. No model downloads or local editor actions have been performed by this session.
 
 ## 7. Change history
+
+### 2026-11-26 — Reuse existing local clone
+
+- User identified the existing repository at `D:\My Studio\CutScene Studio\CutScene-Studio`. Use its parent as the project workspace; do not create a duplicate clone. Supersedes the earlier proposed D: workspace layout.
+- Next: verify local remote, branch, working tree and recent commits before synchronizing, then inspect Ollama and hardware. No local changes or tests performed by this session.
 
 ### 2026-11-26 — D: drive storage policy
 

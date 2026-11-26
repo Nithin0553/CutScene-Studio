@@ -79,6 +79,19 @@ flowchart TD
 - No application code, integration tests, or real engine transfer results have been verified in this repository as of this entry.
 - Prior research code and benchmarks must be reviewed explicitly before reuse. Do not assume prior implementations or results are present here.
 
+## 4A. Mandatory local storage policy — D: (Dimpu)
+
+User explicitly requires D: for the entire project; do not intentionally place project files, models, virtual environments, downloads, assets, caches, logs, temporary files, exports, benchmarks, or engine projects on C:. The approved local workspace layout for initial setup is:
+
+- Root: `D:\CutScene-Studio`
+- Repository: `D:\CutScene-Studio\workspace`
+- Ollama models: `D:\CutScene-Studio\models\ollama`
+- Unity/Unreal projects: `D:\CutScene-Studio\engine-projects\Unity` and `D:\CutScene-Studio\engine-projects\Unreal`
+- Python virtual environment: repository `.venv` on D:; pip/npm/Unity/Unreal/Hugging Face caches under root `cache`
+- Assets, temporary files, logs, exports and backups: corresponding folders under root.
+
+Configure OLLAMA_MODELS before any model pulls, preserve existing models by copying from their actual current location if needed, restart Ollama, and verify models on D: before considering deletion of old copies. Set project-scoped cache and temp variables (PIP_CACHE_DIR, npm_config_cache, HF_HOME, TEMP, TMP); configure Unity and Unreal cache locations using supported version-specific settings before launching engine projects. Keep large local artifacts out of Git. Prefer new tool installs on D: where supported; existing OS and tool binaries/settings may reside on C: and third-party system-level writes cannot be guaranteed absent. Do not delete or move installed applications or Windows files without explicit approval. No local filesystem changes have been verified by this chat.
+
 ## 5. Development roadmap
 
 1. Verify local environment and Ollama model/API availability; review relevant prior implementation and decide what to reuse.
@@ -93,6 +106,8 @@ flowchart TD
 
 ## 6. Next actionable step
 
+First verify the D: volume and create the workspace described in section 4A. Clone the repository into its workspace directory; configure model/cache storage on D: before installing dependencies or downloading models. Verify existing tool locations and model paths, then select the model based on hardware. Do not move existing installations blindly.
+
 Verify the developer machine using PowerShell:
 
 ```powershell
@@ -105,6 +120,12 @@ Get-CimInstance Win32_ComputerSystem | Select-Object TotalPhysicalMemory
 If nvidia-smi is unavailable, check the installed GPU using Windows tools. Confirm Unity/Unreal versions and available disk space before selecting a model and starting implementation. Review the older research repository before deciding which modules to port. No model downloads or local editor actions have been performed by this session.
 
 ## 7. Change history
+
+### 2026-11-26 — D: drive storage policy
+
+- Recorded the user's mandatory D: (Dimpu) storage requirement and proposed local folder layout, including Ollama model storage, caches, dependencies and engine projects.
+- Updated initial setup order to verify and configure D: before downloads and development. Existing Windows/tool system writes are an acknowledged limitation.
+- Documentation-only change; local setup and tests not performed. Next: user runs initial PowerShell setup and shares environment verification outputs.
 
 ### 2026-11-26 — Approved architecture locked
 

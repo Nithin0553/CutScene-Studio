@@ -133,3 +133,11 @@ def test_invalid_schema_does_not_send_request(transport):
     with pytest.raises(ValueError, match="Invalid response schema"):
         op.OllamaProvider().generate("Select a mapping", {"type": "not-a-type"})
     assert not transport[0]
+
+
+@pytest.mark.parametrize("error", [TimeoutError("timeout"), ConnectionRefusedError("refused")])
+def test_transport_failure_preserves_exception_category(transport, error):
+    transport[1].append(error)
+    with pytest.raises(op.OllamaError, match=type(error).__name__):
+        op.OllamaProvider().generate("Select a mapping", SCHEMA)
+    assert transport[2] == [True]

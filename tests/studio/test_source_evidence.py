@@ -1,6 +1,8 @@
 """Source-bound retrieval tests with schema-valid synthetic CSIR."""
 
 import copy
+import json
+from pathlib import Path
 
 import pytest
 from jsonschema import ValidationError
@@ -283,3 +285,66 @@ def test_scene_report_is_detached_from_source_audit(csir):
     report["ced_preflight"]["findings"].clear()
     assert source.report["findings"]
     assert report["execution_authorized"] is False
+
+
+@pytest.fixture
+def handoff_files(csir, tmp_path, monkeypatch):
+    root = Path(__file__).resolve().parents[2]
+    for part in ("integrations/unreal", "packages/cinetwin", "packages/studio"):
+        monkeypatch.syspath_prepend(str(root / part))
+    import transfer_backend
+
+    csir["tracks"] = [csir["tracks"][1]]
+    csir["tracks"][0]["name"] = "Prop movement"
+    csir["entities"] = [
+        {"entity_id": "prop", "ced_type": "entity.prop", "name": "Prop"},
+    ]
+    csir["assets"] = []
+    mapping = {
+        "entities": {"Prop": {"actor_label": "PropUE"}},
+        "assets": {},
+        "sequence_asset_path": "/Game/Staging/LS_Test",
+        "overwrite_sequence": False,
+    }
+    source = SourceEvidence(csir, MappingResources())
+    report = source.analyze_scene(FakeAgent())
+    paths = [tmp_path / name for name in ("source.json", "mapping.json", "analysis.json")]
+    for path, data in zip(paths, (csir, mapping, report), strict=True):
+        path.write_text(json.dumps(data), encoding="utf-8")
+    return transfer_backend, paths, report
+
+
+def test_ai_handoff_uses_existing_backend(handoff_files):
+    backend, paths, report = handoff_files
+    result = backend.inspect_ai_handoff(*paths)
+    assert result["source_sha256"] == report["source_sha256"]
+    assert result["execution_authorized"] is False
+    assert result["behavioral_fidelity_established"] is False
+    assert result["backend_actions"]["transform"] == 1
+    assert result["tracks"][0]["ai_mapping_id"] == "transform"
+    assert result["tracks"][0]["proposal_attributed"] is True
+    assert result["tracks"][0]["backend_outcome"] != "SKIPPED"
+
+
+@pytest.mark.parametrize(
+    "change", ["hash", "mapping", "audit", "track", "authorization", "source"]
+)
+def test_ai_handoff_rejects_changed_evidence(handoff_files, change):
+    backend, paths, report = handoff_files
+    if change == "hash":
+        report["catalog_sha256"] = "changed"
+    elif change == "mapping":
+        report["tracks"][0]["result"]["decision"]["mapping_id"] = "skeletal_animation"
+    elif change == "audit":
+        report["ced_preflight"]["findings"].clear()
+    elif change == "track":
+        report["tracks"][0]["track_id"] = "changed"
+    elif change == "authorization":
+        report["execution_authorized"] = True
+    else:
+        source = json.loads(paths[0].read_text(encoding="utf-8"))
+        source["tracks"][0]["name"] = "Changed"
+        paths[0].write_text(json.dumps(source), encoding="utf-8")
+    paths[2].write_text(json.dumps(report), encoding="utf-8")
+    with pytest.raises(backend.TransferBackendError):
+        backend.inspect_ai_handoff(*paths)

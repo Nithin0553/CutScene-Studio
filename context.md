@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Existing Benchmark001 Unity export directory located
+
+- Owner located the existing Benchmark001 Unity project's CutsceneAI/Exports directory on D:, outside the standalone Studio workspace. Individual export filenames, contents, schema validity, source freshness and source-bound proposals are not yet verified. Use an explicitly selected existing *.csir.json export, not schemas or pytest fixtures; keep historical source data in place and do not add it to Git.
+- Next: enumerate actual exports, have the owner select the intended benchmark snapshot (do not assume newest is canonical), load it read-only with UTF-8 BOM support, instantiate SourceEvidence/MappingResources and run track proposals through the single TransferAgent. Report source digest, counts, CED audit and per-track decisions, preserving all alerts. No destination mapping supplied, so missing target mappings are expected and proposals do not authorize execution. No Unity/Unreal launch or new dependencies required. Full regression and corrected Ruff verification still pending; no application code changes in this checkpoint.
+
 ### 2026-11-26 — Source evidence regression rerun passed; real export not located
 
 - Owner reports corrected targeted suite: 51 passed in 3.93 s. No explicit corrected Ruff output supplied, so lint rerun is not yet independently confirmed. Workspace file search returned the two CSIR schemas and files under pytest temporary directories only; no actual exported Unity cutscene was identified. Do not use test fixtures as native evidence.
@@ -303,6 +308,7 @@ Keep this concise and newest-first. For every change add date, summary, affected
 
 | Date | Change / evidence |
 | --- | --- |
+| 2026-11-26 | Owner located original Benchmark001 Unity export directory on D:; explicit snapshot selection and read-only live source analysis pending. |
 | 2026-11-26 | Corrected 51 targeted tests passed; workspace search found only schemas and test fixtures. Locate actual Unity project export. |
 | 2026-11-26 | Owner passed 51 targeted tests; fixed two source evidence SIM102 lint diagnostics. Local rerun and real source export pending. |
 | 2026-11-26 | Owner confirmed all five live CED smoke outcomes; added source-bound primary action proposals and 12 synthetic CSIR tests. Local validation pending. |

@@ -10,6 +10,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+agent = [
+  "langgraph>=1,<2",
+]
 dev = [
   "pytest>=8,<9",
   "ruff>=0.7",

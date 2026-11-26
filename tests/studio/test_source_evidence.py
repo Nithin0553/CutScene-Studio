@@ -202,3 +202,84 @@ def test_camera_transform_withholds_without_matching_evidence(csir, change):
     assert result.decision.status == "failed"
     assert result.decision.mapping_id is None
     assert not agent.calls
+
+
+def test_scene_report_accounts_for_every_track_and_finding(csir):
+    audio = copy.deepcopy(csir["tracks"][1])
+    audio["track_id"] = "audio"
+    audio["ced_type"] = "audio.track"
+    audio["sections"][0]["section_id"] = "audio-section"
+    audio["sections"][0]["ced_type"] = "audio.section"
+    csir["tracks"].append(audio)
+    source = SourceEvidence(csir, MappingResources())
+    agent = FakeAgent()
+    report = source.analyze_scene(agent)
+    assert report["analysis_status"] == "COMPLETE"
+    assert report["execution_authorized"] is False
+    assert report["source_sha256"] == source.source_sha256
+    assert report["source_counts"] == {"entities": 3, "assets": 1, "tracks": 4}
+    assert report["decision_counts"] == {
+        "proposed": 3, "unsupported": 1, "failed": 0, "not_analyzed": 0,
+    }
+    assert report["ced_preflight"] == source.report
+    assert [row["track_id"] for row in report["tracks"]] == list(source.tracks)
+    character = report["tracks"][0]["result"]
+    assert character["eligible_mapping_ids"] == ["skeletal_animation"]
+    assert len(character["mapping_evidence"]["candidates"]) == 2
+    assert report["tracks"][-1]["result"]["eligible_mapping_ids"] == []
+    assert len(agent.calls) == 3
+
+
+def test_scene_report_stops_after_provider_failure(csir):
+    class FailingAgent(FakeAgent):
+        def select_mapping(self, feature, candidates):
+            self.calls.append((feature, candidates))
+            return MappingDecision("failed", None, "Local model inference failed: HTTP 500")
+
+    source = SourceEvidence(csir, MappingResources())
+    agent = FailingAgent()
+    report = source.analyze_scene(agent)
+    assert report["analysis_status"] == "INCOMPLETE"
+    assert report["provider_failed"] is True
+    assert report["execution_authorized"] is False
+    assert report["decision_counts"] == {
+        "proposed": 0, "unsupported": 0, "failed": 1, "not_analyzed": 2,
+    }
+    assert len(agent.calls) == 1
+    assert [row["status"] for row in report["tracks"]] == [
+        "failed", "not_analyzed", "not_analyzed",
+    ]
+    assert report["tracks"][1]["result"] is None
+    assert report["ced_preflight"] == source.report
+
+
+def test_scene_report_continues_after_source_evidence_failure(csir):
+    csir["tracks"][0]["binding_entity_id"] = "missing"
+    agent = FakeAgent()
+    report = SourceEvidence(csir, MappingResources()).analyze_scene(agent)
+    assert report["analysis_status"] == "COMPLETE"
+    assert report["provider_failed"] is False
+    assert report["decision_counts"]["failed"] == 1
+    assert report["decision_counts"]["proposed"] == 2
+    assert len(agent.calls) == 2
+
+
+def test_scene_report_with_no_tracks_still_retains_audit(csir):
+    csir["tracks"] = []
+    source = SourceEvidence(csir, MappingResources())
+    agent = FakeAgent()
+    report = source.analyze_scene(agent)
+    assert report["analysis_status"] == "COMPLETE"
+    assert report["execution_authorized"] is False
+    assert sum(report["decision_counts"].values()) == 0
+    assert report["tracks"] == []
+    assert report["ced_preflight"] == source.report
+    assert not agent.calls
+
+
+def test_scene_report_is_detached_from_source_audit(csir):
+    source = SourceEvidence(csir, MappingResources())
+    report = source.analyze_scene(FakeAgent())
+    report["ced_preflight"]["findings"].clear()
+    assert source.report["findings"]
+    assert report["execution_authorized"] is False

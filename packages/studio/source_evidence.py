@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,7 @@ class SourceTrackDecision:
     mapping_evidence: MappingEvidence
     source_alerts: tuple[str, ...]
     decision: MappingDecision
+    eligible_mapping_ids: tuple[str, ...] = ()
 
 
 def _has_transform_keys(section: dict[str, Any]) -> bool:
@@ -142,6 +143,7 @@ class SourceEvidence:
         evidence = self.resources.retrieve(feature, "track")
         binding = self.entities.get(track.get("binding_entity_id"), {})
         binding_type = binding.get("ced_type")
+        eligible = ()
         if track.get("muted") or not track["sections"]:
             decision = MappingDecision("unsupported", None, "Inactive source track.")
         elif not evidence.candidates:
@@ -158,5 +160,65 @@ class SourceEvidence:
             else:
                 decision = agent.select_mapping(feature, eligible)
         return SourceTrackDecision(
-            self.source_sha256, track_id, binding_type, evidence, alerts, decision
+            self.source_sha256, track_id, binding_type, evidence, alerts, decision,
+            tuple(item.mapping_id for item in eligible),
         )
+
+
+    def analyze_scene(self, agent: TransferAgent) -> dict[str, Any]:
+        """Collect one read-only report, retaining every track and CED finding.
+
+        Stop further inference after a provider failure. Unvisited tracks remain
+        explicitly unanalysed, not unsupported or successfully transferred.
+        """
+        counts = {"proposed": 0, "unsupported": 0, "failed": 0, "not_analyzed": 0}
+        rows: list[dict[str, Any]] = []
+        provider_failed = False
+        for track_id, track in self.tracks.items():
+            row: dict[str, Any] = {
+                "track_id": track_id,
+                "name": track.get("name", ""),
+                "source_feature": track["ced_type"],
+                "active": not track.get("muted", False) and bool(track["sections"]),
+            }
+            if provider_failed:
+                row.update(
+                    status="not_analyzed",
+                    reason="Not analyzed after local model inference failure.",
+                    result=None,
+                )
+            else:
+                result = self.propose_track(agent, track_id)
+                row.update(
+                    status=result.decision.status,
+                    reason=result.decision.reason,
+                    result=asdict(result),
+                )
+                provider_failed = (
+                    result.decision.status == "failed"
+                    and result.decision.reason.startswith("Local model inference failed:")
+                )
+            counts[row["status"]] += 1
+            rows.append(row)
+
+        report = {
+            "kind": "cutsceneai.source_analysis",
+            "version": "0.1.0",
+            "source_cutscene_id": self.csir["cutscene_id"],
+            "source_sha256": self.source_sha256,
+            "catalog_sha256": self.resources.catalog["_sha256"],
+            "capabilities_sha256": self.resources.capabilities_sha256,
+            "source_counts": {
+                "entities": len(self.entities),
+                "assets": len(self.assets),
+                "tracks": len(self.tracks),
+            },
+            "analysis_status": "INCOMPLETE" if counts["not_analyzed"] else "COMPLETE",
+            "provider_failed": provider_failed,
+            "execution_authorized": False,
+            "decision_counts": counts,
+            "tracks": rows,
+            "ced_preflight": self.report,
+        }
+        # Return a detached JSON-compatible snapshot, not mutable audit references.
+        return json.loads(json.dumps(report, allow_nan=False))

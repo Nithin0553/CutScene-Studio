@@ -109,6 +109,11 @@ class MappingResources:
                 "unsupported", None,
                 f"No eligible strict mapping ({evidence.capability_state}).",
             )
+        elif len(evidence.candidates) > 1:
+            decision = MappingDecision(
+                "failed", None,
+                "Multiple builder actions require source binding or payload evidence.",
+            )
         else:
             decision = agent.select_mapping(source_feature, evidence.candidates)
         return GroundedDecision(evidence, decision)

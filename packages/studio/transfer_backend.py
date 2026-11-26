@@ -13,6 +13,7 @@ import hashlib
 import json
 import math
 from collections import Counter
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -917,3 +918,150 @@ def compose_files(
         evidence["source_feature_surface_sha256"] = _sha(surface_file)
         evidence["source_feature_surface_path"] = str(surface_file.resolve())
     return plan, report, evidence
+
+
+def inspect_ai_handoff(
+    csir_path: str | Path,
+    mapping_path: str | Path,
+    analysis_path: str | Path,
+    *,
+    capture_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Compare source-bound AI proposals with the existing deterministic plan.
+
+    This inspection never changes a prepared plan, queues a job or authorizes
+    execution. The analysis is advisory and must match current source evidence.
+    """
+    from packages.studio.mapping_resources import MappingResources
+    from packages.studio.source_evidence import SourceEvidence
+    from packages.studio.transfer_agent import MappingDecision
+
+    source = SourceEvidence(_load(Path(csir_path)), MappingResources())
+    analysis = _load(Path(analysis_path))
+    if (
+        analysis.get("kind") != "cutsceneai.source_analysis"
+        or analysis.get("version") != "0.1.0"
+        or analysis.get("analysis_status") != "COMPLETE"
+        or analysis.get("provider_failed") is not False
+        or analysis.get("execution_authorized") is not False
+    ):
+        raise TransferBackendError("Expected a complete, advisory source analysis.")
+    rows = analysis.get("tracks")
+    if not isinstance(rows, list) or len(rows) != len(source.tracks):
+        raise TransferBackendError("Source analysis track coverage differs.")
+    # Reconstruct the source-bound report without calling the model. Reuse
+    # only recorded decisions that remain eligible; never trust saved routes.
+    decisions = []
+    for row in rows:
+        try:
+            decision = row["result"]["decision"]
+            status = decision["status"]
+            mapping_id = decision["mapping_id"]
+            elapsed = decision["total_seconds"]
+        except (KeyError, TypeError) as exc:
+            raise TransferBackendError("Malformed source analysis decision.") from exc
+        if status not in ("proposed", "unsupported"):
+            raise TransferBackendError("Failed or unanalysed source decisions require review.")
+        if elapsed is not None and (
+            type(elapsed) not in (int, float) or not math.isfinite(elapsed) or elapsed < 0
+        ):
+            raise TransferBackendError("Invalid source analysis inference duration.")
+        if status == "proposed" and not isinstance(mapping_id, str):
+            raise TransferBackendError("Invalid source analysis mapping ID.")
+        if status == "unsupported" and mapping_id is not None:
+            raise TransferBackendError("Unsupported source decision has a mapping ID.")
+        decisions.append(decision)
+
+    class RecordedSelection:
+        """Replay only a saved selection through the current source eligibility gate."""
+
+        def select_mapping(self, feature, candidates):
+            decision = decisions[self.index]
+            selected = decision["mapping_id"]
+            if decision["status"] == "unsupported":
+                return MappingDecision("unsupported", None, "Model abstained.",
+                                       decision["total_seconds"])
+            if selected not in {item.mapping_id for item in candidates}:
+                raise TransferBackendError("Saved mapping is not source-eligible.")
+            return MappingDecision(
+                "proposed", selected,
+                "Selected from eligible mappings; native preflight still required.",
+                decision["total_seconds"],
+            )
+
+    replay = RecordedSelection()
+    for index, track_id in enumerate(source.tracks):
+        replay.index = index
+        expected = _serialized_json(asdict(source.propose_track(replay, track_id)))
+        if rows[index].get("result") != expected:
+            raise TransferBackendError("Source analysis decision or evidence differs.")
+        track = source.tracks[track_id]
+        if (
+            rows[index].get("track_id") != track_id
+            or rows[index].get("source_feature") != track["ced_type"]
+            or rows[index].get("name") != track.get("name", "")
+            or rows[index].get("active") is not (
+                not track.get("muted", False) and bool(track["sections"])
+            )
+            or rows[index].get("status") != expected["decision"]["status"]
+            or rows[index].get("reason") != expected["decision"]["reason"]
+        ):
+            raise TransferBackendError("Source analysis track identity differs.")
+    counts = {key: 0 for key in ("proposed", "unsupported", "failed", "not_analyzed")}
+    for row in rows:
+        counts[row["status"]] += 1
+    if (
+        analysis.get("source_cutscene_id") != source.csir["cutscene_id"]
+        or analysis.get("source_sha256") != source.source_sha256
+        or analysis.get("catalog_sha256") != source.resources.catalog["_sha256"]
+        or analysis.get("capabilities_sha256") != source.resources.capabilities_sha256
+        or analysis.get("source_counts") != {
+            "entities": len(source.entities), "assets": len(source.assets),
+            "tracks": len(source.tracks),
+        }
+        or analysis.get("decision_counts") != counts
+        or analysis.get("ced_preflight") != source.report
+    ):
+        raise TransferBackendError("Source analysis snapshot, resources or audit differ.")
+
+    plan, coverage, evidence = compose_files(
+        csir_path, mapping_path, capture_path=capture_path,
+    )
+    if source.source_sha256 != SourceEvidence(
+        _load(Path(csir_path)), MappingResources()
+    ).source_sha256:
+        raise TransferBackendError("Source changed during handoff inspection.")
+    dispatch = {
+        row["source_location"]: row
+        for row in coverage["feature_dispatch"]["source_occurrences"]
+        if row["kind"] == "tracks"
+    }
+    comparison = []
+    for index, (row, ledger) in enumerate(zip(rows, coverage["tracks"], strict=True)):
+        if ledger["track_id"] != row["track_id"]:
+            raise TransferBackendError("Backend track identity differs from source analysis.")
+        selected = row["result"]["decision"]["mapping_id"]
+        matched = dispatch.get(f"tracks[{index}]", {}).get("matching_plan_action_kinds", [])
+        comparison.append({
+            "track_id": row["track_id"],
+            "track_name": ledger["track_name"],
+            "ai_status": row["status"],
+            "ai_mapping_id": selected,
+            "backend_outcome": ledger["outcome"],
+            "attributed_action_kinds": matched,
+            "proposal_attributed": selected in matched if selected else None,
+            "backend_details": ledger["details"],
+        })
+    return {
+        "kind": "cutsceneai.ai_handoff_inspection",
+        "version": "0.1.0",
+        "source_sha256": source.source_sha256,
+        "analysis_sha256": _sha(Path(analysis_path)),
+        "backend_evidence": evidence,
+        "analysis_decision_counts": counts,
+        "backend_actions": dict(Counter(action["kind"] for action in plan["actions"])),
+        "backend_ced_preflight": coverage["ced_preflight"],
+        "tracks": comparison,
+        "execution_authorized": False,
+        "behavioral_fidelity_established": False,
+    }

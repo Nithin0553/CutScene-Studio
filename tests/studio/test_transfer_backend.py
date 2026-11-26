@@ -633,3 +633,65 @@ def test_moving_animated_character_does_not_get_competing_static_transform():
                    a.get("entity_name") == "A" for a in plan["actions"])
     assert any(a["kind"] == "skeletal_animation" and
                a.get("entity_name") == "A" for a in plan["actions"])
+
+
+def test_native_actions_preserve_exact_source_track_identity():
+    src, target = source(), mapping()
+    target["assets"]["source.wav"] = "/Game/Staging/Sound"
+    # Two camera cuts share a name and actor, but have distinct source IDs.
+    first = src["tracks"][2]
+    first["sections"][0]["end"] = rt(1)
+    second = copy.deepcopy(first)
+    second["track_id"] = "cuts:2"
+    second["sections"][0].update(section_id="s6", start=rt(1), end=rt(2))
+    src["tracks"].append(second)
+    original = copy.deepcopy(src)
+
+    plan, report = transfer_backend.compose(src, target)
+    assert src == original
+    expected = {
+        "moving:1": "transform",
+        "cuts:1": "camera_cut",
+        "cuts:2": "camera_cut",
+        "sound:1": "audio",
+        "event:1": "marker",
+    }
+    actual = {
+        action["source_track_id"]: action["kind"]
+        for action in plan["actions"] if "source_track_id" in action
+    }
+    assert actual == expected
+    rows = {
+        row["source_id"]: row
+        for row in report["feature_dispatch"]["source_occurrences"] if row["kind"] == "tracks"
+    }
+    for track_id, action in expected.items():
+        assert rows[track_id]["matching_plan_action_kinds"] == [action]
+        assert rows[track_id]["behavior_fidelity_verified"] is False
+    assert rows["sound:1"]["state"] == "LOSSY_ACTION_PLANNED_UNVERIFIED"
+    assert rows["event:1"]["state"] == "LOSSY_ACTION_PLANNED_UNVERIFIED"
+    assert rows["custom:1"]["matching_plan_action_kinds"] == []
+
+
+@pytest.mark.parametrize("change", ["unknown_id", "duplicate_id"])
+def test_invalid_explicit_track_identity_does_not_fall_back_to_name(change):
+    src = source()
+    track = src["tracks"][2]
+    action = {
+        "kind": "camera_cut",
+        "track_name": track["name"],
+        "source_track_id": track["track_id"],
+    }
+    if change == "unknown_id":
+        action["source_track_id"] = "missing"
+    else:
+        duplicate = copy.deepcopy(track)
+        duplicate["name"] = "Another cut"
+        src["tracks"].append(duplicate)
+    report = transfer_backend.feature_dispatch.audit(src, {"actions": [action]})
+    rows = [
+        row for row in report["source_occurrences"]
+        if row["kind"] == "tracks" and row["ced"] == "camera.cut"
+    ]
+    assert rows
+    assert all(not row["matching_plan_action_kinds"] for row in rows)

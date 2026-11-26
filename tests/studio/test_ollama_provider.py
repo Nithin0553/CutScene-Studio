@@ -5,7 +5,6 @@ import pytest
 
 from packages.studio import ollama_provider as op
 
-
 SCHEMA = {
     "type": "object",
     "properties": {"mapping_id": {"enum": ["skeletal_animation", "unsupported"]}},

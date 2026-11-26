@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — CED retrieval automated tests passed; lint correction
+
+- Owner ran the targeted provider, agent and mapping resource suite: 39 passed in 3.64 s. Ruff reported one TRY004 diagnostic in mapping_resources.py for a capability group that is not a dictionary. Fixed by raising TypeError with a clearer message (79c9487). No conversion behavior or capability policy changed.
+- Next: fast-forward, rerun Ruff and targeted pytest, then run the previously supplied real-resource live inference smoke. No live CED resource results or native tests have been supplied yet. Full regression remains pending after agent integration; proceed to CSIR source evidence only after validating this checkpoint.
+
 ### 2026-11-26 — LangGraph live smoke passed; existing CED retrieval integrated
 
 - Owner ran 26 provider/agent tests at 626b2fb (26 passed in 1.54 s, no skips/failures); Ruff on agent and tests passed. Live graph selected skeletal_animation for animation.clip (72.7081812 s), audio_track for audio.track (2.4529384 s), and correctly returned unsupported with no inference for physics.collider. These were illustrative inputs, not actual CED or engine evidence. Full regression has not been rerun since earlier 713 passed / 7 skipped baseline. Draft PR #1 open; connector returned no PR workflow runs for prior HEAD.
@@ -280,6 +285,7 @@ Keep this concise and newest-first. For every change add date, summary, affected
 
 | Date | Change / evidence |
 | --- | --- |
+| 2026-11-26 | Owner passed all 39 targeted tests; fixed mapping resource TRY004. Local lint rerun and live CED smoke pending. |
 | 2026-11-26 | Owner passed 26 provider/agent tests and three live graph cases; added read-only strict CED mapping resource retrieval and ambiguity guard with 13 tests. Local verification pending. |
 | 2026-11-26 | Live provider returned correct mapping twice (67.77 s cold / 1.90 s warm); added isolated LangGraph mapping workflow, optional dependency and mocked tests. Local graph validation pending. |
 | 2026-11-26 | Owner reports provider lint and unit tests passed (16 inferred from reported typo); live smoke pending. Documentation only. |

@@ -83,6 +83,15 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Full regression passed; actual Benchmark001 analysis exposed runtime gaps
+
+- Owner ran full pytest: 764 passed, 7 skipped in 125.74 s; all seven skips are tests/test_studio_audit_stage4_layout.py:30 because original external Stage 4 evidence fixtures are unavailable. No failures. The earlier 51 targeted tests passed after lint changes; corrected Ruff result still not explicitly supplied. This is software regression, not native fidelity.
+- Owner selected Benchmark001_Timeline-5c57872a-c003fd95d7404698a2f2e2a303c86346.csir.json from original Unity project's export directory (timestamp 2026-11-24 09:56:42). SourceEvidence loaded and schema-validated actual Unity CSIR: canonical JSON digest 2324a760d692db16b894545b3840ca599748f9e22c2699aa6c1b48ac964f7c1b; 10 s (9.999999999999), 20 entities, 10 assets, 7 tracks. CED REVIEW_REQUIRED: 179 KNOWN_PARTIAL, 7 MISSING_TARGET_MAPPING, 60 SUPPORTED_UNVERIFIED, 186 active alerts. Source-only audit intentionally has no destination mapping. No source/target engine mutation.
+- Results: CHARACTER_Animation, MOVING_PROP_Movement, CAM_A_Cut, CAM_B_Cut passed source candidate narrowing but each failed with generic Local model inference failed. Cause unconfirmed (transport, service, HTTP, completion or validation); do not claim Ollama fixed. CAM_B_Animation failed because camera.transform primary route was not implemented. AUDIO_Main and EVENT_Main withheld as KNOWN_PARTIAL under strict mode. Overall 5 failed, 2 unsupported, 0 proposed.
+- Corrected camera.transform source route (8df933e): require camera binding, recognized camera.transform infinite section or animation.section clip, transform keys in every section. This is a primary transform proposal only, not FOV/curve fidelity; FOV-only or insufficient evidence remains withheld. Existing planner unmodified. Added 6 camera route guard tests (0e1804a).
+- Improved Ollama transport exception category (72df0f2) and preserved provider error reason in LangGraph decisions (78af4d8); no payload dumping, retries, fake fallback or bypass. Added timeout/refused diagnostics tests (159a10f) and strengthened existing agent failure test (2a74a4f). New tests are not yet run; expected targeted count 59. No dependency or model changes.
+- Next: fetch/fast-forward, run Ruff across four AI modules/tests, targeted pytest and local provider health + actual source-bound smoke (first eligible track, then full seven tracks if working). Capture exact new reason if still failing and check local Ollama logs/service without launching engines. Keep strict partial policy and actual source alerts; no target execution until preflight and native readback. Full regression after these fixes remains pending. Do not commit original source artifacts.
+
 ### 2026-11-26 — Existing Benchmark001 Unity export directory located
 
 - Owner located the existing Benchmark001 Unity project's CutsceneAI/Exports directory on D:, outside the standalone Studio workspace. Individual export filenames, contents, schema validity, source freshness and source-bound proposals are not yet verified. Use an explicitly selected existing *.csir.json export, not schemas or pytest fixtures; keep historical source data in place and do not add it to Git.
@@ -308,6 +317,7 @@ Keep this concise and newest-first. For every change add date, summary, affected
 
 | Date | Change / evidence |
 | --- | --- |
+| 2026-11-26 | Full regression 764 passed, 7 external Stage 4 skips; actual Benchmark001 read-only analysis revealed provider failures and camera.transform gap. Added camera route and diagnostics; local rerun pending. |
 | 2026-11-26 | Owner located original Benchmark001 Unity export directory on D:; explicit snapshot selection and read-only live source analysis pending. |
 | 2026-11-26 | Corrected 51 targeted tests passed; workspace search found only schemas and test fixtures. Locate actual Unity project export. |
 | 2026-11-26 | Owner passed 51 targeted tests; fixed two source evidence SIM102 lint diagnostics. Local rerun and real source export pending. |

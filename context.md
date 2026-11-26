@@ -83,12 +83,19 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
-### Local setup checkpoint (2026-11-26)
+### Environment verified; next: local inference and storage configuration (2026-11-26)
+
+- Owner's PowerShell output confirms the feature branch fast-forwarded successfully to f5b54fe, matching its remote at the time. All 15 untracked Unity .meta files remain intact. No new clone, branch switch, reset or clean needed.
+- Dell G15 5511, 15.73 GB RAM, NVIDIA RTX 3050 with 4096 MiB VRAM, 1,529.80 GB free on D:. Existing .venv-studio runs Python 3.12.10. Ollama 0.18.2 is installed on D: and reports qwen2.5:7b-instruct (4.7 GB). OLLAMA_MODELS already points to D:\AI\Models\Ollama. Reuse this shared model location instead of moving/downloading models. Verify API and actual inference; model compatibility with structured outputs and tools is not yet tested. 4 GB VRAM/16 GB RAM means partial CPU offload and editor memory contention are likely; start with a small context and release the model when idle.
+- Inspected tools/start_studio.ps1, tools/studio_local_bridge.py and integrations/unreal/studio_local_editor_worker.py: backend CLI already accepts --workspace; worker start(workspace=...) accepts the same path. Both default to Path.home() / '.cutscene-studio' / 'runs'; launcher does not yet expose workspace. Next implementation should expose portable D: workspace configuration in launcher and keep the backend/worker/bootstrap paths consistent, with regression tests. Do not launch with the default home directory, or reconnect an active worker to a different workspace without checking outstanding jobs. Preserve historical runs.
+- Next local checks: create D: project cache/temp/run directories beside the existing clone (no replacement clone or venv); set process-scoped TEMP/TMP/PIP_CACHE_DIR/npm_config_cache/HF_HOME; query Ollama /api/tags, run small JSON-schema inference using installed model with num_ctx=2048 and keep_alive=0; inspect existing Python dependency availability. Confirm engine versions, engine project and cache paths before native launch. No model pull, dependency install, code change or inference/test has been performed by this chat.
+
+### Local setup checkpoint (2026-11-26; prior observation)
 
 - Owner confirmed the correct existing clone on D: (Dimpu), with 1,529.80 GB free, local HEAD 9245e5b on feature/deterministic-studio-v1, and an existing .venv-studio. The machine-specific workspace path is recorded in [main context](https://github.com/Nithin0553/CutScene-Studio/blob/main/context.md). Do not clone again or switch to main.
 - User's git fetch showed origin/feature/deterministic-studio-v1 at fc2682b, three commits ahead. GitHub comparison confirms those commits only changed AGENTS.md, CONTRIBUTING.md, README.md and context.md; preserve all 15 untracked Unity .meta files. Re-fetch before a fast-forward, inspect incoming added paths for collisions, do not clean/reset/stash/delete metadata blindly.
 - D: is mandatory for project-owned files, models, dependencies, engine projects, assets, runs, logs, caches and temporary files. Existing default run storage under ~/.cutscene-studio/runs is a migration blocker; inspect configuration and redirect backend and Unreal worker consistently before launch. Preserve existing native evidence. Windows/tool system settings may still reside on C:.
-- Next: safely fast-forward the active feature branch, inspect existing tooling, Ollama models, RAM/GPU and existing model storage, then audit reusable components and run baseline checks with D: storage configured before implementing the approved agent. No new code or native tests performed in this session. Historical B001/B002 evidence and open acceptance tasks below remain relevant; they do not certify the new AI architecture.
+- The fast-forward and initial hardware checks are now complete; follow the environment checkpoint above. No new code or native tests performed in this session. Historical B001/B002 evidence and open acceptance tasks below remain relevant; they do not certify the new AI architecture.
 
 ## 4. Architecture and implementation map (existing deterministic baseline)
 
@@ -228,6 +235,7 @@ Keep this concise and newest-first. For every change add date, summary, affected
 
 | Date | Change / evidence |
 | --- | --- |
+| 2026-11-26 | Owner confirmed feature branch synchronization and hardware/Ollama/venv configuration. Inspected existing backend and worker workspace overrides and identified launcher configuration gap. Reuse Qwen 2.5 7B and D: model storage; inference, dependency and native checks pending. Documentation only. |
 | 2026-11-26 | Owner approved single-agent Ollama/LangGraph target and D: storage, confirmed existing local feature branch and untracked Unity metadata. Reconciled context/AGENTS direction with approved architecture; no implementation or tests run. Next: safe fast-forward, environment and storage verification. |
 | 2026-11-24 | Literature/model feasibility review recorded in section 8: direct scene converters vs learned 2D level translation vs trainable mapping/retargeting candidates. Verified prior handoff a2a9338 push/PR CI success. Research recommendation only; no model downloads, inference, training, engine tests or production changes. Next research step: isolated upstream reproduction and paired target-label design if approved. |
 | 2026-11-24 | Resumed from 3702f93; verified draft PR #1 remains open targeting unchanged main and both push/PR CI passed. Inspected Results/job/readback implementation; documented read-only B001 evidence collection and black-viewport isolation in section 8. Documentation only; no new local or native tests run. Next: owner supplies matching B001 run evidence before conversion changes. |

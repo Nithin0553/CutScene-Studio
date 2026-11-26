@@ -83,6 +83,12 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Ollama direct generation recovered; memory pressure observed
+
+- Owner reproduced matching structured request directly via /api/generate successfully (HTTP 200, skeletal_animation, done true/stop). Total 53.7977143 s, load 50.5728886 s, prompt 0.7243432 s, generation 1.8411929 s. Server log reports runner startup ~46.4 s, 13/29 layers offloaded to GPU, 2048 context, CUDA model buffer 1745.80 MiB, compute 730.36 MiB. Model storage remains on D:.
+- System sample while model was loaded: 15.73 GB total RAM / 1.33 GB free, RTX 3050 3828/4096 MiB VRAM in use, other graphics processes including Epic Games Launcher and renderer processes. Memory contention is a plausible contributor to earlier HTTP 500, not confirmed: provided log tail contains successful request but no original failure. No reinstall, model changes, process termination or hardware purchases needed for diagnosis.
+- Next: save work and voluntarily close unused graphics-heavy applications, keep Ollama running, recheck resource availability, run existing provider smoke and actual Benchmark001 track analysis with current diagnostic changes; if failure recurs capture matching error body and preceding server log lines. Run 59 targeted tests and Ruff (pending); preserve existing source artifacts, strict CED policy, and native preflight. No application code changed in this checkpoint.
+
 ### 2026-11-26 — Isolated Ollama generation HTTP 500
 
 - Owner confirmed /api/tags works and qwen2.5:7b-instruct (4.7 GB, ID 845dbda0ea48) is installed; ollama ps empty (normal idle). Independent structured generation via OllamaProvider failed with HTTP 500 at /api/generate, underlying cause None (HTTP response, not a chained Python transport exception). This reproduces the inference failure outside CSIR and LangGraph. Exact server cause remains unknown; current provider does not expose response body for non-200 responses.

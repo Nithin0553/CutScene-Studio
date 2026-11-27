@@ -165,6 +165,9 @@ def inspect_candidate(
             required = "Actor"
         if required and not hasattr(api, required):
             raise RuntimeError("Required Unreal actor class unavailable: " + required)
+    for row in setup['actors']:
+        if row.get('light_setup'):
+            scene.studio_light_properties.preflight(row, api)
     primitives = scene.preflight_primitive_meshes(setup, api)
     if (_snapshot(session_path)[1] != session_hash
             or _snapshot(setup_path)[1] != setup_hash

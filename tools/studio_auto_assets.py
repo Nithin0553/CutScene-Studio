@@ -12,6 +12,7 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
+import studio_light_properties
 import studio_source_identity as source_identity
 import studio_source_materials
 
@@ -259,6 +260,13 @@ def inspect(csir_path, mapping_path, plan_path, source_project, source_scope, ta
             elif source_type:
                 actor_spec['source_light_type'] = source_type
                 actor_spec['target_light_class'] = native_classes[source_type]
+                try:
+                    light_setup = studio_light_properties.plan(light, source_type)
+                    if light_setup:
+                        actor_spec['light_setup'] = light_setup
+                        warnings.append('Light '+name+': numeric source properties staged; color space, physical intensity units and render equivalence remain unverified.')
+                except (ValueError, TypeError) as exc:
+                    blockers.append('Cannot stage Unity light '+name+': '+str(exc))
             else:
                 warnings.append('Unity light '+name+
                                 ' has no captured source type; PointLight is a legacy '
@@ -453,6 +461,7 @@ def inspect(csir_path, mapping_path, plan_path, source_project, source_scope, ta
             'inspector_code_sha256':digest(Path(__file__).resolve()),
             'identity_adapter_sha256':digest(Path(source_identity.__file__).resolve()),
             'material_adapter_sha256':digest(Path(studio_source_materials.__file__).resolve()),
+            'light_adapter_sha256':digest(Path(studio_light_properties.__file__).resolve()),
             'actors':actors,'imports':imports,'asset_resolutions':asset_resolutions,
             'fbx_embedded_material_import_requested': import_fbx_materials,
             'deduplicated_textures':deduplicated_textures,
@@ -480,6 +489,7 @@ def _mismatch_reason(expected, current):
         ('inspector_code_sha256', 'automatic asset inspector'),
         ('identity_adapter_sha256', 'Unity source identity resolver'),
         ('material_adapter_sha256', 'source material resolver'),
+        ('light_adapter_sha256', 'static light property adapter'),
     )
     for field, title in adapters:
         if expected.get(field) != current.get(field):

@@ -32,6 +32,7 @@ MODULES = (
     # the Unity source and immutable candidate are unchanged.
     ("studio_source_identity", "tools"),
     ("studio_source_materials", "tools"),
+    ("studio_light_properties", "tools"),
     ("studio_auto_assets", "tools"),
 )
 

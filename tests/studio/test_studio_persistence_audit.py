@@ -350,3 +350,40 @@ def test_distinct_process_does_not_override_provenance_incomplete(tmp_path):
     report = AUDIT.audit(jobfile, candidate / "audit.json", unreal_api=fake)
     assert report["restart_verified"] is False
     assert report["status"] == "STRUCTURAL_READBACK_INCOMPLETE"
+
+
+@pytest.mark.parametrize("case,status", [
+    ("valid", "STRUCTURAL_READBACK_PASS_RESTART_UNVERIFIED"),
+    ("wrong_class", "STRUCTURAL_READBACK_FAIL"),
+    ("wrong_range", "STRUCTURAL_READBACK_FAIL"),
+    ("missing_component", "STRUCTURAL_READBACK_INCOMPLETE"),
+])
+def test_static_light_properties_are_observed_after_reopen(tmp_path, case, status):
+    from test_studio_light_properties import Actor as LightActor, Component
+
+    _root, jobfile, candidate, fake, _assets, actors = fixture(tmp_path)
+    manifest = json.loads((candidate / "automatic-setup.json").read_text())
+    manifest["actors"].append({
+        "name": "LIGHT", "label": "Light", "kind": "entity.light",
+        "target_light_class": "SpotLight",
+        "light_setup": {"attenuation_radius": 500.0, "intensity": 3.0},
+    })
+    _write(candidate / "automatic-setup.json", manifest)
+    plan = json.loads((candidate / "transfer-plan.json").read_text())
+    plan["actions"] = [{"kind": "light_intensity", "actor_label": "Light"}]
+    _write(candidate / "transfer-plan.json", plan)
+    actor = Actor("Light", "PointLight" if case == "wrong_class" else "SpotLight")
+    native = LightActor()
+    native.component.properties = {"attenuation_radius": 200.0 if case == "wrong_range" else 500.0,
+                                   "intensity": 99.0}
+    fake.LightComponentBase = Component
+    if case != "missing_component":
+        actor.get_components_by_class = native.get_components_by_class
+    actors.append(actor)
+    result = AUDIT.audit(jobfile, candidate / "light-audit.json", unreal_api=fake)
+    assert result["status"] == status
+    if case != "wrong_class":
+        row = result["static_light_properties"][0]
+        assert row["excluded_animated_fields"] == ["intensity"]
+        assert row["expected"] == {"attenuation_radius": 500.0}
+    assert result["fidelity_verified"] is False

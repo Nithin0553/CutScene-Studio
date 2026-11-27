@@ -17,6 +17,7 @@ ROOT=Path(__file__).resolve().parents[2]
 if str(ROOT/'tools') not in sys.path:
     sys.path.insert(0,str(ROOT/'tools'))
 import studio_auto_assets as assets_plan
+import studio_light_properties
 import studio_material_restore
 
 
@@ -111,7 +112,7 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
              'status':'BLOCKED','actors_created':[],'assets_imported':[],
              'asset_operations':[],'actor_operations':[],'failed_step':None,
              'level_saved':False,'changes_possible':False,'fidelity_verified':False,
-              'material_restoration':[],
+              'material_restoration':[], 'light_property_setup':[],
              'unsupported':['Unity .mat materials/shader graphs are not reconstructed; FBX embedded materials are optional and partial',
                             'Unity particle/VFX/constraints/scripts and signal payloads are not reconstructed',
                             'Imported animation bone correspondence and audio playback are not verified']}
@@ -162,6 +163,7 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
             if target_class not in light_classes or not hasattr(api, target_class):
                 raise AutomaticSetupError('Required Unreal native light class unavailable: '+
                                           str(target_class))
+            studio_light_properties.preflight(row, api)
         ed=api.get_editor_subsystem(api.EditorActorSubsystem)
         current={}
         for actor in ed.get_all_level_actors():
@@ -266,6 +268,10 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
                 mesh = component.get_editor_property('static_mesh') if component is not None else None
                 if _klass(mesh) != 'StaticMesh' or str(mesh.get_path_name()) != row['mesh_path']:
                     raise AutomaticSetupError('Spawned primitive mesh readback differs: '+row['name'])
+            if row.get('light_setup'):
+                receipt['failed_step']={'phase':'light_property_setup','name':row['name']}
+                measurement = studio_light_properties.apply(actor, row, api)
+                receipt['light_property_setup'].append(dict(measurement, actor=row['name']))
             operation['status']='ACTOR_LABEL_CHECKED'
             receipt['actors_created'].append({'name':row['name'],'label':row['label'],'kind':kind})
             receipt['failed_step']=None

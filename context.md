@@ -1,6 +1,6 @@
 # CutScene Studio — Living Development Context
 
-Last updated: 2026-11-26. This is the canonical handoff for the **new standalone repository**, not the earlier AI-agent research Studio.
+Last updated: 2026-11-27. This is the canonical handoff for the **new standalone repository**, not the earlier AI-agent research Studio.
 
 ## 1. Start here in every new chat
 
@@ -82,6 +82,13 @@ flowchart TD
 - Existing deterministic components on this feature branch must be inspected and reused where suitable; the Ollama/LangGraph integration is not yet verified.
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
+
+### 2026-11-27 — Bounded lighting regression verified; source static light properties
+
+- Owner confirmed 2dba115: Ruff and 224 targeted Python cases passed; duration not supplied. Previous host/provider suite 252 passed and Node 23; counts overlap, not full suite. PR #1 open draft.
+- Unity extractor already captures light intensity/color/range/cone angles/shadows. Automatic staging now preserves available values in a source-bound light_setup manifest, checks reflected native component API during read-only AI inspection and native setup, applies properties only on freshly spawned supported light actors and checks actual native property readback before saving. No source mutation or existing actor reuse. Directional lights omit irrelevant local range/cones. Local range meters to cm; Unity full cone angles to Unreal half angles (bounded to 89 degrees). Raw normalized RGB quantized to stored 8-bit channels (not a color-space conversion); intensity numeric copy is not physical photometric unit conversion. Unsupported/invalid values explicitly block, missing metadata retains legacy behavior. CED partial status unchanged.
+- Independent persistence audit now checks source-identified exact light actor class and actual static light properties, excluding mapped animated fields; missing measurement INCOMPLETE, mismatch FAIL. Native setup receipt records observed properties; no claim of equivalent rendered light, falloff, shadow maps, color space or brightness. Bind helper source hash in setup manifest and reload canonical helper before asset inspector. Existing immutable candidates must be prepared anew after inspector code changes.
+- Added 17 pure/mock light cases, three manifest/setup integration cases, four persistence cases (24 total). Not executed remotely; run previous conversion suite and affected automatic setup/asset inspector/persistence/planner-sync tests; lint new helper and previously clean modules. No UI changes; keep Unity/Unreal/Ollama closed. Next audit animation/rig and material/environment coverage and bounded CineTwin repair. Native acceptance still pending.
 
 ### 2026-11-27 — Event annotation regression verified; bounded light intensity sections
 

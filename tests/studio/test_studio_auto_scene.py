@@ -637,3 +637,66 @@ def test_read_only_ai_native_setup_preflight(tmp_path, monkeypatch, case):
     assert fake.assets == before_assets
     assert fake.actor_sys.actors == before_actors
     assert not mutations
+
+
+@pytest.mark.parametrize("case", ["valid", "missing_api", "invalid_source"])
+def test_source_static_light_setup_is_manifest_bound_and_native_checked(tmp_path, case):
+    from test_studio_light_properties import Actor as LightActor, Component
+
+    root, files = create(tmp_path)
+    csir = json.loads(files[0].read_text())
+    light = next(row for row in csir["entities"] if row["ced_type"] == "entity.light")
+    light["metadata"] = {"light": {
+        "light_type": "Spot", "intensity": 3.0, "range": 5.0,
+        "spot_angle_degrees": 60, "inner_spot_angle_degrees": 20,
+        "shadows_enabled": case != "invalid_source" if case != "invalid_source" else "false",
+        "color": {"r": 0.5, "g": 1.0, "b": 0.0},
+    }}
+    files[0].write_text(json.dumps(csir))
+    stage = studio_auto_assets.inspect(
+        *files, root, "Assets/Benchmark002", "/Game/CutSceneAI/AutoTransfer/T_ABC")
+    if case == "invalid_source":
+        assert not stage["ready"]
+        assert any("Cannot stage Unity light" in reason for reason in stage["blockers"])
+        return
+    spec = next(row for row in stage["actors"] if row["kind"] == "entity.light")
+    assert spec["light_setup"]["attenuation_radius"] == 500
+    assert spec["light_setup"]["outer_cone_angle"] == 30
+    manifest = tmp_path / "auto-setup.json"
+    manifest.write_text(json.dumps(stage))
+    project = tmp_path / "NewProject.uproject"
+    project.write_text("{}")
+    api = FakeUnreal(str(project))
+    if case == "valid":
+        class SpawnedLight(LightActor, Actor):
+            def __init__(self):
+                Actor.__init__(self)
+                LightActor.__init__(self)
+
+        api.SpotLight = SpawnedLight
+        api.LightComponentBase = Component
+        api.Color = lambda **kwargs: SimpleNamespace(**kwargs)
+        original = api.actor_sys.spawn_actor_from_class
+
+        def spawn(cls, loc, rot):
+            if cls is not SpawnedLight:
+                return original(cls, loc, rot)
+            actor = cls()
+            api.actor_sys.actors.append(actor)
+            return actor
+
+        api.actor_sys.spawn_actor_from_class = spawn
+    output = tmp_path / "receipt.json"
+    kwargs = dict(csir_path=str(files[0]), mapping_path=str(files[1]),
+                  plan_path=str(files[2]), expected_project=str(project),
+                  expected_level="/Game/Tests/L_Test", unreal_api=api)
+    if case == "missing_api":
+        with pytest.raises(scene.AutomaticSetupError, match="Native light component"):
+            scene.run(str(manifest), str(output), **kwargs)
+        assert not api.assets and not api.actor_sys.actors
+        assert json.loads(output.read_text())["status"] == "BLOCKED"
+    else:
+        result = scene.run(str(manifest), str(output), **kwargs)
+        assert result["light_property_setup"][0]["status"] == "PASS"
+        assert result["light_property_setup"][0]["observed"] == spec["light_setup"]
+        assert result["fidelity_verified"] is False

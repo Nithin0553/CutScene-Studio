@@ -83,6 +83,12 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — All 18 cinematic UI regression scenarios passed
+
+- Owner confirmed the corrected Node mock-backend suite passed all 18 scenarios, including AI preparation-only, explicit fresh deterministic recovery, no replay, failure handling, native errors and Home-first startup. Latest Python baseline remains 804 passed / seven known external Stage 4 skips. Post-correction Ruff output not explicitly supplied. No application changes in this checkpoint.
+- Reviewed tools/start_studio.ps1, studio_project_discovery.py and studio_ui_features.py for live preparation. Next use an isolated D: storage root with the existing checkout/venv and an unused localhost port; run the existing Ollama model on its D: model store, close Unity/Unreal during inference, connect real saved Unity and backed-up Unreal project folders through UI, select the previously analyzed Benchmark001 CSIR and matching Source Census. Native AI approval/queue remain blocked. Do not bypass identity or strict census; explicitly review partial findings before any best-effort preparation. If matching exports are missing, stop and record blocker rather than fabricate data. Generated discovery mapping, optional capture and hierarchy options can change plan counts versus the 17-action example-mapping baseline; compare proposal attribution and session hashes rather than assume identical counts.
+- Live UI/host inference is still unverified. Retain source-analysis report and candidate evidence on D: outside Git. After successful live preparation, verify native interpreter dependencies and canonical imports before changing execution gate, then model lifecycle and bounded CineTwin repair. Draft PR #1 remains open; no prior-head PR workflow runs returned.
+
 ### 2026-11-26 — Restored AI UI regression polling correction
 
 - Owner reported Node assertion failure in testRestoredAIPlanNeverAutoQueues, line 525, expected one /api/execute call but observed zero after explicitly switching to a fresh deterministic candidate. Inspected current cinematic.js and harness: start() invokes advance() while action holds busy, so actual submission is deferred to next status poll, as in existing deterministic and restored-pending tests. The new test omitted that poll. No application/native execution failure established by this mock test.

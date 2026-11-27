@@ -10,6 +10,7 @@ saved candidate evidence is mutated.
 from __future__ import annotations
 
 import importlib
+import struct
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -128,6 +129,52 @@ def _check_namespace(name: str, expected: Path) -> None:
         raise PlannerSyncError("Noncanonical Studio namespace: " + name)
 
 
+def _runtime_dependency_path() -> Path | None:
+    """Only select the explicitly provisioned compatible Windows runtime bundle."""
+    if (sys.platform != "win32" or sys.implementation.name != "cpython"
+            or sys.version_info[:2] != (3, 11) or struct.calcsize("P") != 8):
+        return None
+    return ROOT.parent / "runtime-dependencies" / "unreal-python311"
+
+
+def configure_ai_dependencies() -> Path | None:
+    """Use an existing interpreter dependency or the local provisioned bundle.
+
+    No installation, site-package modification or candidate-provided path.
+    The deterministic planner never calls this bootstrap.
+    """
+    if find_spec("jsonschema") is not None:
+        return None
+    folder = _runtime_dependency_path()
+    if folder is None or not folder.is_dir():
+        return None
+    folder = folder.resolve()
+    # Do not silently combine a cached, foreign version of a core dependency
+    # with this isolated bundle. Restarting the editor is safer than unloading
+    # modules which another plugin may already be using.
+    for name in ("jsonschema", "jsonschema_specifications", "referencing", "rpds",
+                 "attrs", "attr", "typing_extensions"):
+        if name not in sys.modules:
+            continue
+        module = sys.modules[name]
+        origin = getattr(module, "__file__", None)
+        if not origin or not Path(origin).resolve().is_relative_to(folder):
+            raise PlannerSyncError(
+                "AI dependency " + name + " is already loaded outside the "
+                "isolated runtime bundle; restart the intended Python interpreter."
+            )
+    entry = str(folder)
+    while entry in sys.path:
+        sys.path.remove(entry)
+    sys.path.insert(0, entry)
+    importlib.invalidate_caches()
+    spec = find_spec("jsonschema")
+    if spec is None or not spec.origin or not Path(spec.origin).resolve().is_relative_to(folder):
+        sys.path.remove(entry)
+        raise PlannerSyncError("The isolated runtime bundle has no usable jsonschema package.")
+    return folder
+
+
 def synchronize_ai() -> dict[str, str]:
     """Refresh only the replay dependencies, independently of native execution."""
     root = str(ROOT.resolve())
@@ -138,13 +185,15 @@ def synchronize_ai() -> dict[str, str]:
     _check_namespace("packages", ROOT / "packages")
     _check_namespace("packages.studio", ROOT / "packages" / "studio")
     try:
+        configure_ai_dependencies()
         from jsonschema import Draft202012Validator
         if not callable(getattr(Draft202012Validator, "validate", None)):
             raise ImportError("Draft 2020-12 validator unavailable")
     except ImportError as exc:
         raise PlannerSyncError(
             "AI replay requires jsonschema (>=4.23,<5) in this Python interpreter. "
-            "Install it into the intended interpreter before retrying verification."
+            "Provision compatible dependencies in the Studio runtime-dependencies folder "
+            "or use an interpreter that already has them."
         ) from exc
     return {
         "packages.studio." + name: _refresh(

@@ -110,13 +110,9 @@ def build_expectation(
             if float(action.get("source_offset_seconds", 0.0)) > 0:
                 track["source_offset_seconds"] = float(action["source_offset_seconds"])
             if float(action.get("blend_in_seconds", 0.0)) > 0:
-                track["ease_in_frames"] = int(
-                    round(float(action["blend_in_seconds"]) * frame_rate)
-                )
+                track["ease_in_frames"] = round(float(action["blend_in_seconds"]) * frame_rate)
             if float(action.get("blend_out_seconds", 0.0)) > 0:
-                track["ease_out_frames"] = int(
-                    round(float(action["blend_out_seconds"]) * frame_rate)
-                )
+                track["ease_out_frames"] = round(float(action["blend_out_seconds"]) * frame_rate)
             expected_root_delta = action.get("expected_root_delta_cm")
             if expected_root_delta is not None:
                 track["effective_root_delta_cm"] = [
@@ -193,8 +189,8 @@ def build_expectation(
                 fps = (float(plan["display_rate"]["numerator"])
                        / float(plan["display_rate"]["denominator"]))
                 for side in ("in", "out"):
-                    audio[f"ease_{side}_frames"] = int(
-                        round(float(action.get(f"fade_{side}_seconds", 0.0)) * fps)
+                    audio[f"ease_{side}_frames"] = round(
+                        float(action.get(f"fade_{side}_seconds", 0.0)) * fps
                     )
             audio_sections.append(audio)
 

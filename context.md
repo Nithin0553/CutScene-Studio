@@ -83,6 +83,13 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Audio adapter lint correction
+
+- Owner reported 37 Ruff diagnostics at 17d89e9; no Python regression output supplied for that revision. Latest verified suite remains 252 targeted passes in 123.29 s, Node 23, prior Ruff clean. Draft PR #1 remains open.
+- Corrected redundant int(round(...)) casts (float arithmetic yields integer round), successive key iteration using itertools.pairwise (Python 3.11+), redundant root-profile computations already performed by _source_root_samples_unreal_cm, unused math import, and collections.abc imports. No blanket unsafe auto-fix or global lint suppression.
+- Preserved historical broad exception compatibility fallbacks at native Unreal reflection/plugin boundaries with line-specific BLE001 justifications and contextual debug logging replacing silent pass. Native root-motion error remains recorded. New audio easing measurement catches common native accessor exceptions, logs debug evidence and returns None, never substitutes zero. Added one regression for a failing native audio easing getter (23 new audio cases cumulatively). Legacy fallback defaults are unchanged and do not gain new fidelity claims.
+- Correction not locally executed by assistant; rerun the seven-file Ruff command and six-module conversion/validation regression, then continue next adapter milestone only after results. No UI changes, native launches, model downloads or evidence edits. Existing candidate replay may require fresh preparation if actual source-derived audio plan changed.
+
 ### 2026-11-26 — Memory readiness verified; benchmark audio adapter and readback
 
 - Owner confirmed at 7fdcf50: 252 targeted Python passes in 123.29 s, Node syntax and all 23 UI scenarios passed, Ruff clean. Existing fresh-map and approval checkpoints remain verified by software tests only. Draft PR #1 open. Full suite last confirmed 822 passes / seven known external skips.

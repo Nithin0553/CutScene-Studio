@@ -79,11 +79,19 @@ def test_attached_actor_cannot_mislabel_local_key_as_world(static_pose_helper):
     assert static_pose_helper([_track()], object()) is None
 
 
-@pytest.mark.parametrize("value,expected", [(12, 12), (0, 0), (-1, None), (None, None), (True, None)])
+@pytest.mark.parametrize("value,expected", [
+    (12, 12), (0, 0), (-1, None), (None, None), (True, None),
+    (RuntimeError("native accessor failed"), None),
+])
 def test_audio_easing_native_readback_does_not_invent_values(monkeypatch, value, expected):
     fake = types.ModuleType("unreal")
+    def read_duration(section):
+        if isinstance(value, RuntimeError):
+            raise value
+        return value
+
     fake.MovieSceneSectionEasingExtensions = types.SimpleNamespace(
-        get_ease_in_duration=lambda section: value)
+        get_ease_in_duration=read_duration)
     monkeypatch.setitem(sys.modules, "unreal", fake)
     monkeypatch.setitem(sys.modules, "unreal_compat", types.ModuleType("unreal_compat"))
     file = Path(__file__).resolve().parents[2] / "integrations/unreal/readback_level_sequence.py"

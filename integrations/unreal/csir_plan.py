@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -70,7 +71,7 @@ def rational_seconds(value: dict[str, Any]) -> float:
 
 
 def seconds_to_frame(seconds: float, numerator: int, denominator: int) -> int:
-    return int(round(seconds * numerator / denominator))
+    return round(seconds * numerator / denominator)
 
 
 def _asset_index(csir: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -146,7 +147,7 @@ def _curve_value(curve: dict[str, Any] | None, time_seconds: float, default: flo
         return float(keys[0]["value"])
     if time_seconds >= float(keys[-1]["time_seconds"]):
         return float(keys[-1]["value"])
-    for left, right in zip(keys, keys[1:]):
+    for left, right in pairwise(keys):
         t0 = float(left["time_seconds"])
         t1 = float(right["time_seconds"])
         if t0 <= time_seconds <= t1:
@@ -274,15 +275,6 @@ def _source_root_profile_unreal_cm(
     required = ("RootT.x", "RootT.y", "RootT.z")
     if not all(name in curves for name in required):
         return None
-
-    source_start = rational_seconds(
-        section.get(
-            "source_offset",
-            {"value": 0, "rate": {"numerator": 1, "denominator": 1}},
-        )
-    )
-    timeline_duration = rational_seconds(section["end"]) - rational_seconds(section["start"])
-    source_end = source_start + timeline_duration * float(section.get("time_scale", 1.0))
 
     samples = _source_root_samples_unreal_cm(section, world_rotation)
     positions_unreal_cm = [

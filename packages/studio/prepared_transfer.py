@@ -147,6 +147,9 @@ def prepare(
     out = Path(output_dir)
     if out.exists() or out.is_symlink():
         raise PreparedTransferError("Refusing to reuse or overwrite a Studio transfer directory.")
+    source_hash = _sha(source_file)
+    mapping_hash = _sha(mapping_file)
+    capture_hash = _sha(capture_file) if capture_file is not None else None
     source = _read(source_file)
     mapping = _read(mapping_file)
     if mapping.get("overwrite_sequence") is True:
@@ -163,9 +166,15 @@ def prepare(
         raise PreparedTransferError("CED preflight requires review; strict transfer blocked.")
 
     fingerprint = str(source.get("source", {}).get("project_fingerprint") or "")
-    source_hash = _sha(source_file)
-    mapping_hash = _sha(mapping_file)
-    capture_hash = _sha(capture_file) if capture_file is not None else None
+    if (
+        evidence["csir_sha256"] != source_hash
+        or evidence["mapping_sha256"] != mapping_hash
+        or evidence.get("source_capture_sha256") != capture_hash
+        or _sha(source_file) != source_hash
+        or _sha(mapping_file) != mapping_hash
+        or (capture_file is not None and _sha(capture_file) != capture_hash)
+    ):
+        raise PreparedTransferError("Source, mapping or capture changed during preparation.")
     target_name = str(Path(target_project).resolve()) if target_project is not None else None
     import_inputs = (asset_manifest_path, asset_receipt_path, asset_original_mapping_path)
     if any(value is not None for value in import_inputs) and not all(
@@ -185,7 +194,7 @@ def prepare(
         "evidence.json": evidence,
     }
     analysis_attachment = None
-    if inspection is not None:
+    if inspection is not None and analysis_file is not None:
         analysis_hash = inspection["analysis_sha256"]
         if _sha(analysis_file) != analysis_hash:
             raise PreparedTransferError("AI source analysis changed during preparation.")
@@ -235,7 +244,7 @@ def prepare(
 
 
 def verify(output_dir: str | Path) -> dict[str, Any]:
-    """Read-only: prove immutable handoff still matches original CSIR/mapping/capture."""
+    """Recompute the immutable handoff, including optional advisory AI evidence."""
     folder = Path(output_dir)
     session = _read(folder / "session.json")
     if (session.get("kind") != "cutsceneai.studio.prepared_transfer"
@@ -284,7 +293,7 @@ def verify(output_dir: str | Path) -> dict[str, Any]:
     plan, report, evidence, inspection = _compose_candidate(
         src_path, map_path, cap_path, analysis_file,
     )
-    if inspection is not None and (
+    if inspection is not None and analysis is not None and (
         inspection["analysis_sha256"] != analysis["sha256"]
         or _read(folder / "ai-handoff.json") != inspection
     ):

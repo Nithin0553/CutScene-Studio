@@ -494,3 +494,104 @@ def test_builtin_cube_identity_does_not_guess_from_names(change):
     assert studio_auto_assets.source_identity.is_unity_builtin_cube(entity)
     record[change] = 'unverified'
     assert not studio_auto_assets.source_identity.is_unity_builtin_cube(entity)
+
+
+@pytest.mark.parametrize("case", [
+    "valid", "unbound_project", "wrong_project", "wrong_level", "namespace",
+    "sequence", "asset", "actor", "wrong_bounds",
+])
+def test_read_only_ai_native_setup_preflight(tmp_path, monkeypatch, case):
+    import studio_ai_native_preflight as preflight
+
+    project = tmp_path / 'Staging.uproject'
+    project.write_text('{}')
+    candidate = tmp_path / 'candidate'
+    candidate.mkdir()
+    sequence = '/Game/Tests/LS_Fresh'
+    asset = '/Game/Tests/Stage/Character'
+    mesh_path = '/Engine/BasicShapes/Cube.Cube'
+    session = {
+        'session_id': 'fixture-session',
+        'target': {
+            'project_path': None if case == 'unbound_project' else str(project),
+            'sequence_asset_path': sequence,
+        },
+    }
+    setup = {
+        'target_folder': '/Game/Tests/Stage',
+        'imports': [{'target_asset_path': asset}],
+        'actors': [
+            {'label': 'Floor', 'kind': 'entity.prop', 'mesh_path': mesh_path,
+             'source_primitive': 'unity_builtin_cube'},
+            {'label': 'Sun', 'kind': 'entity.light', 'target_light_class': 'DirectionalLight'},
+            {'label': 'Camera', 'kind': 'entity.camera'},
+        ],
+    }
+    (candidate / 'session.json').write_text(json.dumps(session))
+    (candidate / 'automatic-setup.json').write_text(json.dumps(setup))
+    proof = {'session_id': 'fixture-session', 'artifact_sha256': {'ai-handoff.json': 'fixture'}}
+    calls = []
+
+    def replay(folder, *, require_setup):
+        assert folder == candidate and require_setup is True
+        calls.append(folder)
+        return proof
+
+    monkeypatch.setattr(preflight.studio_ai_verifier, 'verify_candidate', replay)
+    fake = FakeUnreal(str(project))
+    fake.EditorAssetLibrary.does_directory_exist = lambda _: case == 'namespace'
+    fake.StaticMeshComponent = object()
+    cube = Asset('StaticMesh', mesh_path)
+    extent = 49 if case == 'wrong_bounds' else 50
+    cube.get_bounds = lambda: SimpleNamespace(
+        origin=SimpleNamespace(x=0, y=0, z=0),
+        box_extent=SimpleNamespace(x=extent, y=50, z=50),
+    )
+    fake.assets[mesh_path] = cube
+    if case == 'wrong_project':
+        fake.project = str(tmp_path / 'Other.uproject')
+    if case == 'wrong_level':
+        fake.world.get_path_name = lambda: '/Game/Tests/Other.Other'
+    if case == 'sequence':
+        fake.assets[sequence] = Asset('LevelSequence', sequence)
+    if case == 'asset':
+        fake.assets[asset] = Asset('SkeletalMesh', asset)
+    if case == 'actor':
+        fake.actor_sys.actors.append(Actor('Floor'))
+
+    before = {p: p.read_bytes() for p in candidate.iterdir()}
+    before_assets = dict(fake.assets)
+    before_actors = list(fake.actor_sys.actors)
+    kwargs = {
+        'expected_project': str(project),
+        'expected_level': '/Game/Tests/L_Test',
+        'unreal_api': fake,
+    }
+    if case == 'valid':
+        result = preflight.inspect_candidate(candidate, **kwargs)
+        assert result['status'] == 'AI_NATIVE_SETUP_PREFLIGHT_PASSED'
+        assert result['session_id'] == 'fixture-session'
+        assert result['planned_actor_count'] == 3
+        assert result['planned_import_count'] == 1
+        assert result['verified_native_mesh_paths'] == [mesh_path]
+        assert result['native_import_readback_pending'] is True
+        assert result['execution_authorized'] is False
+        assert result['engine_generation_executed'] is False
+        assert result['behavioral_fidelity_established'] is False
+    else:
+        expected = {
+            'unbound_project': 'not bound',
+            'wrong_project': 'Wrong Unreal staging project',
+            'wrong_level': 'Open the selected staging level',
+            'namespace': 'namespace already exists',
+            'sequence': 'Sequence path already occupied',
+            'asset': 'Existing target import asset',
+            'actor': 'Existing actor label',
+            'wrong_bounds': 'Cube bounds differ',
+        }[case]
+        with pytest.raises((ValueError, scene.AutomaticSetupError), match=expected):
+            preflight.inspect_candidate(candidate, **kwargs)
+    assert calls == ([] if case == 'unbound_project' else [candidate])
+    assert {p: p.read_bytes() for p in candidate.iterdir()} == before
+    assert fake.assets == before_assets
+    assert fake.actor_sys.actors == before_actors

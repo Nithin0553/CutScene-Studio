@@ -12,7 +12,9 @@ class LightPropertyError(ValueError):
 
 
 def _number(value, name):
-    if type(value) not in (int, float) or not math.isfinite(value):
+    if type(value) not in (int, float):
+        raise TypeError("Invalid numeric Unity light property: " + name)
+    if not math.isfinite(value):
         raise LightPropertyError("Invalid finite Unity light property: " + name)
     return float(value)
 
@@ -126,7 +128,11 @@ def apply(actor, row, api):
     component = _component(actor, api)
     if "outer_cone_angle" in fields:
         component.set_editor_property("inner_cone_angle", 0.0)
+        component.set_editor_property("outer_cone_angle", fields["outer_cone_angle"])
+        component.set_editor_property("inner_cone_angle", fields["inner_cone_angle"])
     for name, value in fields.items():
+        if name in {"inner_cone_angle", "outer_cone_angle"}:
+            continue
         if name == "light_color":
             value = api.Color(r=value[0], g=value[1], b=value[2], a=255)
         component.set_editor_property(name, value)

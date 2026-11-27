@@ -111,3 +111,21 @@ def test_animated_properties_are_not_misclassified_as_saved_base_state():
     fields = lights.static_fields(row, actions)
     assert "intensity" not in fields and "cast_shadows" not in fields
     assert fields["attenuation_radius"] == 1250
+
+
+
+def test_spot_cone_order_does_not_depend_on_serialized_field_order():
+    actor = Actor()
+    fields = {"inner_cone_angle": 20.0, "outer_cone_angle": 40.0}
+    writes = []
+    original = actor.component.set_editor_property
+
+    def record(name, value):
+        writes.append((name, value))
+        original(name, value)
+
+    actor.component.set_editor_property = record
+    result = lights.apply(actor, {"target_light_class": "SpotLight", "light_setup": fields}, native_api())
+    assert result["status"] == "PASS"
+    assert writes == [
+        ("inner_cone_angle", 0.0), ("outer_cone_angle", 40.0), ("inner_cone_angle", 20.0)]

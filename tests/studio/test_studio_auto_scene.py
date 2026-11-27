@@ -649,7 +649,7 @@ def test_source_static_light_setup_is_manifest_bound_and_native_checked(tmp_path
     light["metadata"] = {"light": {
         "light_type": "Spot", "intensity": 3.0, "range": 5.0,
         "spot_angle_degrees": 60, "inner_spot_angle_degrees": 20,
-        "shadows_enabled": case != "invalid_source" if case != "invalid_source" else "false",
+        "shadows_enabled": "false" if case == "invalid_source" else True,
         "color": {"r": 0.5, "g": 1.0, "b": 0.0},
     }}
     files[0].write_text(json.dumps(csir))

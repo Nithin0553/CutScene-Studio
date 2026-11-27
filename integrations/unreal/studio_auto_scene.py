@@ -163,7 +163,10 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
             if target_class not in light_classes or not hasattr(api, target_class):
                 raise AutomaticSetupError('Required Unreal native light class unavailable: '+
                                           str(target_class))
-            studio_light_properties.preflight(row, api)
+            try:
+                studio_light_properties.preflight(row, api)
+            except studio_light_properties.LightPropertyError as exc:
+                raise AutomaticSetupError(str(exc)) from exc
         ed=api.get_editor_subsystem(api.EditorActorSubsystem)
         current={}
         for actor in ed.get_all_level_actors():

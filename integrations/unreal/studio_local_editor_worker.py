@@ -162,12 +162,13 @@ def _execute(job):
         if not inspected.get('ready'):
             raise RuntimeError('Prepared source setup is not ready: ' +
                                '; '.join(inspected.get('blockers', [])[:8]))
+        import studio_auto_scene
+        studio_auto_scene.preflight_primitive_meshes(inspected, unreal)
     job['execution_stage'] = 'PREPARING_DESTINATION_LEVEL'
     _ensure_target_level(job)
     if job.get('automatic_setup'):
         # Source verification runs before ANY editor mutation. If an asset import
         # fails, the immutable receipt reports partial changes; do not retry.
-        import studio_auto_scene
         setup_receipt = candidate_dir / ('automatic-setup-receipt-' + job['job_id'] + '.json')
         job['setup_status'] = 'IMPORTING_AND_CREATING_SCENE'
         job['execution_stage'] = 'IMPORTING_ASSETS_AND_CREATING_ACTORS'

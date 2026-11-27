@@ -35,9 +35,14 @@ def _serialize(value: dict[str, Any]) -> str:
     return json.dumps(value, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
 
 
-def _identity(source: str, mapping: str, capture: str | None, target: str | None) -> str:
+def _identity(
+    source: str, mapping: str, capture: str | None, target: str | None,
+    analysis: str | None = None,
+) -> str:
     data = {"source_sha256": source, "mapping_sha256": mapping,
             "source_capture_sha256": capture, "target_project": target}
+    if analysis is not None:
+        data["ai_analysis_sha256"] = analysis
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:20]
 
 
@@ -102,6 +107,25 @@ def _check_asset_import(
         "behavioral_fidelity_verified": False,
     }
 
+def _compose_candidate(
+    source: Path, mapping: Path, capture: Path | None, analysis: Path | None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, str], dict[str, Any] | None]:
+    if analysis is None:
+        plan, report, evidence = transfer_backend.compose_files(
+            source, mapping, capture_path=capture,
+        )
+        return plan, report, evidence, None
+    plan, report, evidence, inspection = transfer_backend.compose_ai_handoff(
+        source, mapping, analysis, capture_path=capture,
+    )
+    if any(
+        row["ai_status"] == "proposed" and row["proposal_attributed"] is not True
+        for row in inspection["tracks"]
+    ):
+        raise PreparedTransferError("AI proposal lacks a matching backend action; review required.")
+    return plan, report, evidence, inspection
+
+
 def prepare(
     csir_path: str | Path,
     mapping_path: str | Path,
@@ -110,6 +134,7 @@ def prepare(
     capture_path: str | Path | None = None,
     target_project: str | Path | None = None,
     strict_ced: bool = False,
+    analysis_path: str | Path | None = None,
     asset_manifest_path: str | Path | None = None,
     asset_receipt_path: str | Path | None = None,
     asset_original_mapping_path: str | Path | None = None,
@@ -118,6 +143,7 @@ def prepare(
     source_file = Path(csir_path).resolve()
     mapping_file = Path(mapping_path).resolve()
     capture_file = Path(capture_path).resolve() if capture_path is not None else None
+    analysis_file = Path(analysis_path).resolve() if analysis_path is not None else None
     out = Path(output_dir)
     if out.exists() or out.is_symlink():
         raise PreparedTransferError("Refusing to reuse or overwrite a Studio transfer directory.")
@@ -130,8 +156,8 @@ def prepare(
         or sequence.endswith("/") or ".." in sequence.split("/")):
         raise PreparedTransferError("Target sequence must be a new /Game/... asset path.")
 
-    plan, report, evidence = transfer_backend.compose_files(
-        source_file, mapping_file, capture_path=capture_file,
+    plan, report, evidence, inspection = _compose_candidate(
+        source_file, mapping_file, capture_file, analysis_file,
     )
     if strict_ced and not report["ced_preflight"]["strict_transfer_allowed"]:
         raise PreparedTransferError("CED preflight requires review; strict transfer blocked.")
@@ -158,6 +184,13 @@ def prepare(
         "coverage-report.json": report,
         "evidence.json": evidence,
     }
+    analysis_attachment = None
+    if inspection is not None:
+        analysis_hash = inspection["analysis_sha256"]
+        if _sha(analysis_file) != analysis_hash:
+            raise PreparedTransferError("AI source analysis changed during preparation.")
+        analysis_attachment = {"path": str(analysis_file), "sha256": analysis_hash}
+        docs["ai-handoff.json"] = inspection
     artifact_hashes = {
         name: hashlib.sha256(_serialize(doc).encode("utf-8")).hexdigest()
         for name, doc in docs.items()
@@ -165,7 +198,10 @@ def prepare(
     session = {
         "kind": "cutsceneai.studio.prepared_transfer",
         "schema_version": VERSION,
-        "session_id": _identity(source_hash, mapping_hash, capture_hash, target_name),
+        "session_id": _identity(
+            source_hash, mapping_hash, capture_hash, target_name,
+            analysis_attachment["sha256"] if analysis_attachment else None,
+        ),
         "cutscene_id": source.get("cutscene_id"),
         "source": {"csir_path": str(source_file), "sha256": source_hash,
                    "engine": source.get("source", {}).get("engine"),
@@ -188,6 +224,8 @@ def prepare(
         "training_example_approved": False,
         "artifact_sha256": artifact_hashes,
     }
+    if analysis_attachment is not None:
+        session["ai_analysis"] = analysis_attachment
     # Explicit 'x' creates fail closed on accidental races, rather than modifying artifacts.
     out.mkdir(parents=True, exist_ok=False)
     for name, doc in {**docs, "session.json": session}.items():
@@ -212,9 +250,18 @@ def verify(output_dir: str | Path) -> dict[str, Any]:
         raise PreparedTransferError("Original CSIR or mapping changed since session preparation.")
     if cap_path is not None and _sha(cap_path) != capture["sha256"]:
         raise PreparedTransferError("Original CineTwin source capture has changed.")
+    analysis = session.get("ai_analysis")
+    analysis_file = None
+    if analysis is not None:
+        if not isinstance(analysis, dict) or set(analysis) != {"path", "sha256"}:
+            raise PreparedTransferError("Malformed AI source analysis attachment.")
+        analysis_file = Path(analysis["path"])
+        if not analysis_file.is_file() or _sha(analysis_file) != analysis["sha256"]:
+            raise PreparedTransferError("Original AI source analysis changed or is missing.")
     if session["session_id"] != _identity(
         source["sha256"], target["mapping_sha256"],
         capture["sha256"] if capture else None, target.get("project_path"),
+        analysis["sha256"] if analysis else None,
     ):
         raise PreparedTransferError("Session identity mismatch.")
     attached = session.get("asset_import")
@@ -226,18 +273,22 @@ def verify(output_dir: str | Path) -> dict[str, Any]:
         )
         if refreshed != attached:
             raise PreparedTransferError("Linked asset import provenance changed.")
-    for name, expected in session["artifact_sha256"].items():
-        if name not in {
-            "transfer-plan.json", "coverage-report.json", "evidence.json"
-        } or _sha(folder / name) != expected:
-            raise PreparedTransferError(f"Prepared artifact modified or missing: {name}")
-    if set(session["artifact_sha256"]) != {
-        "transfer-plan.json", "coverage-report.json", "evidence.json"
-    }:
+    expected_artifacts = {"transfer-plan.json", "coverage-report.json", "evidence.json"}
+    if analysis is not None:
+        expected_artifacts.add("ai-handoff.json")
+    if set(session["artifact_sha256"]) != expected_artifacts:
         raise PreparedTransferError("Incomplete or unexpected artifact manifest.")
-    plan, report, evidence = transfer_backend.compose_files(
-        src_path, map_path, capture_path=cap_path,
+    for name, expected in session["artifact_sha256"].items():
+        if not (folder / name).is_file() or _sha(folder / name) != expected:
+            raise PreparedTransferError(f"Prepared artifact modified or missing: {name}")
+    plan, report, evidence, inspection = _compose_candidate(
+        src_path, map_path, cap_path, analysis_file,
     )
+    if inspection is not None and (
+        inspection["analysis_sha256"] != analysis["sha256"]
+        or _read(folder / "ai-handoff.json") != inspection
+    ):
+        raise PreparedTransferError("Prepared AI handoff differs from source-derived evidence.")
     transfer_backend.verify_prepared_artifacts(
         _read(folder / "transfer-plan.json"),
         _read(folder / "coverage-report.json"),

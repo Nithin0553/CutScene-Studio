@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Independent expanded candidate replay passed in isolated Studio Python
+
+- Owner supplied verifier JSON: AI_EVIDENCE_REPLAY_VERIFIED, session 33c2df7eb818ad86a5a6, raw source SHA256 9639d6410ca16bd2f0c18ed44ae9cb1fee77699caf6bfb53992365d426368e7b, analysis SHA256 dd8ac47d3c39619528bde770ad08960b2881f629b3c5ab63c6f3c7dc2f5b9b01; four artifact hashes verified, five proposed/five attributed, two unsupported, zero failed/not analyzed, 21 actions, automatic setup verified with 11 actors/five imports/seven native Cube references. All execution and fidelity flags false. 17 canonical module names reported; Python 3.12.10 in existing D: .venv-studio under isolated -I -B command. No native editor interpreter tested yet.
+- Owner has not supplied the new targeted regression results; latest confirmed full suite remains 812 passed / seven known external skips, plus 18 Node scenarios. Next locate installed Unreal Engine Python executable and check Python version and jsonschema import without editor launch. If dependency absent, use an isolated D: target directory for matching interpreter dependencies, not global install or copying incompatible venv binaries. Replay exact expanded candidate with actual engine-bundled Python outside the editor; embedded-editor verification and native authorization remain separate. No production changes in this checkpoint.
+
 ### 2026-11-26 — Independent AI replay verifier and native worker gate
 
 - Added canonical qualified-module synchronization in integrations/unreal/studio_planner_sync.py (273e7ed). Refreshes packages.studio CED/catalog, provider types, transfer-agent types, retrieval and source-evidence modules in dependency order, rejects foreign or mixed namespace packages and shadowed cached modules, checks Draft202012Validator availability, and checks module resolution before loading. The existing bare deterministic synchronization remains separately callable without requiring AI dependencies. No LangGraph graph construction or Ollama inference is needed for replay.

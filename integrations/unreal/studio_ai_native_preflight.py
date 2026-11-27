@@ -97,6 +97,12 @@ def inspect_candidate(
     ):
         raise RuntimeError("Unreal automatic scene adapter is from another checkout.")
     api = unreal_api
+    import audio_trim
+
+    plan, plan_hash = _snapshot(folder / "transfer-plan.json")
+    if plan_hash != proof["artifact_sha256"].get("transfer-plan.json"):
+        raise ValueError("Transfer plan changed after AI replay.")
+    audio_trim.preflight(plan.get("actions", []), api)
     observed_project = scene._project(api)
     observed_level = scene._level(api)
     if not _same_project(observed_project, expected_project):

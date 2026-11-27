@@ -59,6 +59,27 @@ def audio_fade_seconds(section: dict[str, Any], side: str) -> float:
     return authored
 
 
+def audio_source_offset_seconds(section: dict[str, Any]) -> float:
+    """Preserve canonical clip-in; reject non-unit speed instead of guessing pitch."""
+    native = section.get("native_payload") or {}
+    try:
+        if "source_offset" in section:
+            offset = rational_seconds(section["source_offset"])
+        else:
+            offset = float(native.get("clip_in_seconds", 0.0))
+        speed = float(section.get("time_scale", native.get("time_scale", 1.0)))
+        native_speed = float(native.get("time_scale", speed))
+        native_offset = float(native.get("clip_in_seconds", offset))
+    except (KeyError, TypeError, ValueError, ZeroDivisionError, OverflowError) as exc:
+        raise PlanError("Invalid audio source timing.") from exc
+    if (not math.isfinite(offset) or offset < 0 or not math.isfinite(native_offset)
+            or native_offset < 0 or abs(native_offset - offset) > 1e-6):
+        raise PlanError("Invalid or conflicting audio source offset.")
+    if speed != 1.0 or native_speed != 1.0:
+        raise PlanError("Non-unit audio playback speed requires a dedicated time-scale adapter.")
+    return offset
+
+
 def load_json(path: str | Path) -> dict[str, Any]:
     # Accept BOM-prefixed UTF-8 from Windows PowerShell and ordinary UTF-8 alike.
     with Path(path).open("r", encoding="utf-8-sig") as handle:
@@ -963,9 +984,11 @@ def build_plan(csir: dict[str, Any], mapping: dict[str, Any]) -> dict[str, Any]:
                 asset = assets.get(asset_id)
                 if not asset:
                     continue
+                offset = audio_source_offset_seconds(section)
                 plan["actions"].append(
                     {
                         "kind": "audio",
+                        **({"source_offset_seconds": offset} if offset else {}),
                         "fade_in_seconds": audio_fade_seconds(section, "in"),
                         "fade_out_seconds": audio_fade_seconds(section, "out"),
                         "unreal_asset_path": _mapping_asset(mapping, asset["name"]),

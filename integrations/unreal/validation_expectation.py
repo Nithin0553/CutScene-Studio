@@ -192,6 +192,8 @@ def build_expectation(
                     audio[f"ease_{side}_frames"] = round(
                         float(action.get(f"fade_{side}_seconds", 0.0)) * fps
                     )
+            if float(action.get("source_offset_seconds", 0.0)) > 0:
+                audio["source_offset_seconds"] = float(action["source_offset_seconds"])
             audio_sections.append(audio)
 
         elif kind == "marker":

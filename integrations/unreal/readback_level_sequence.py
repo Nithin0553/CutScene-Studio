@@ -19,6 +19,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+import audio_trim
 import readback_math
 import unreal_compat
 
@@ -655,6 +656,7 @@ def _audio_section(section: Any) -> dict[str, Any]:
         "loop": loop,
         "ease_in_frames": _audio_easing_frames(section, "in"),
         "ease_out_frames": _audio_easing_frames(section, "out"),
+        "source_offset_ticks": audio_trim.read_ticks(section),
     }
 
 
@@ -849,12 +851,19 @@ def readback(
             for section in _sections(track):
                 audio_sections.append(_audio_section(section))
 
+    audio_tick_resolution = None
+    if audio_sections:
+        try:
+            audio_tick_resolution = audio_trim.tick_resolution(sequence, unreal)
+        except Exception:
+            LOGGER.debug("Native audio tick resolution unavailable", exc_info=True)
     return {
         "schema_version": "0.1.0",
         "engine": {
             "name": "unreal",
             "version": unreal_compat.engine_version(),
         },
+        "audio_tick_resolution": audio_tick_resolution,
         "sequence_asset_path": sequence_asset_path,
         "display_rate": rate,
         "playback": {

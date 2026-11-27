@@ -92,6 +92,9 @@ def _load_asset(asset_path: str) -> unreal.Object:
 
 def _preflight(plan: dict[str, Any]) -> None:
     """Probe target capabilities and mappings before mutating actors or creating assets."""
+    import audio_trim
+
+    audio_trim.preflight(plan.get("actions", []), unreal)
     required_actions = {str(action["kind"]) for action in plan.get("actions", [])}
     try:
         unreal_compat.validate_runtime_capabilities(required_actions)
@@ -854,6 +857,9 @@ def _add_audio(sequence: unreal.LevelSequence, action: dict[str, Any]) -> None:
     section.set_range(int(action["start_frame"]), int(action["end_frame"]))
     section.set_sound(sound)
     section.set_looping(bool(action.get("loop", False)))
+    import audio_trim
+
+    audio_trim.apply(section, sequence, action, unreal)
     # Audio fades are source Timeline easing semantics. Require native section
     # easing instead of silently discarding authored envelopes.
     rate = sequence.get_display_rate()

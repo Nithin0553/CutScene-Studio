@@ -83,6 +83,12 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-27 — Audio lint passed; native clip-in adapter
+
+- Owner reported "All checks passed!" after 9b6b239; confirms lint, no separate numerical Python output supplied. Retain 252 targeted passes in 123.29 s as latest explicit count, Node 23. Draft PR #1 open. Previous audio easing software suite result not independently counted.
+- Implemented canonical CSIR audio source_offset with fallback to legacy native clip_in_seconds, reject conflicting/invalid timing and non-unit speed (no verified pitch/time-scale equivalence). Zero offsets retain existing plan shape. New pure native audio_trim adapter checks reflected setter/getter/tick-resolution APIs, uses sequence tick units and checks immediate native setter readback. AI read-only inspection checks immutable plan hash then probes required trim API before approval; builder also checks. Readback records native ticks and tick rate independently; validation compares source-quantized offsets with matching audio occurrence identities including authored easing pairs. Missing measurement is incomplete; wrong known ticks fail. Epic UE 5.8 MovieSceneAudioSection docs expose setter/getter; actual native tick semantics and audible playback remain unverified. No promotion of CED partial audio status.
+- Added 23 software cases (9 planner/expectation, 5 validation, 9 pure/mock native adapter), updated AI inspector fixture for plan hash. No native tests or local regression executed remotely. Re-run prior conversion/validation suite plus test_audio_trim.py and test_studio_auto_scene.py. Check Ruff for new helper/changed pure planner/validation/test/readback/preflight files; builder has historical lint debt not addressed in this milestone. Keep engines and Ollama closed. Next: event payload and other adapter coverage, followed by bounded CineTwin repair. Preserve all historical evidence; fresh preparation needed for changed plans.
+
 ### 2026-11-27 — Audio readback redundant lint directives
 
 - Owner fast-forwarded to a479de1 and reran the seven-file Ruff check: 15 remaining diagnostics, all in readback_level_sequence.py (one I001 blank line and 14 RUF100 unused BLE001 directives). Ruff recognizes contextual exception logging, so the added suppressions on logged handlers are unnecessary.

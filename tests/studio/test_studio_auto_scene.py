@@ -531,7 +531,10 @@ def test_read_only_ai_native_setup_preflight(tmp_path, monkeypatch, case):
     }
     (candidate / 'session.json').write_text(json.dumps(session))
     (candidate / 'automatic-setup.json').write_text(json.dumps(setup))
-    proof = {'session_id': 'fixture-session', 'artifact_sha256': {'ai-handoff.json': 'fixture'}}
+    plan_path = candidate / 'transfer-plan.json'
+    plan_path.write_text(json.dumps({'actions': []}))
+    proof = {'session_id': 'fixture-session', 'artifact_sha256': {
+        'ai-handoff.json': 'fixture', 'transfer-plan.json': preflight._snapshot(plan_path)[1]}}
     calls = []
 
     def replay(folder, *, require_setup):

@@ -775,6 +775,51 @@ def compare(
             "this does not establish waveform, envelope shape or mixing parity.",
         )
 
+    # Match offset and, where authored, easing together for repeated audio
+    # identities. Never substitute source values for missing native ticks.
+    rate = actual.get("audio_tick_resolution")
+    valid_rate = isinstance(rate, Mapping) and all(
+        type(rate.get(key)) is int and rate[key] > 0 for key in ("numerator", "denominator")
+    )
+    for index, (identity, rows) in enumerate(exp_groups.items()):
+        if not any("source_offset_seconds" in row for row in rows):
+            continue
+        with_easing = any("ease_in_frames" in row or "ease_out_frames" in row for row in rows)
+        observed = act_groups.get(identity, [])
+        wanted = []
+        measured = []
+        if valid_rate:
+            for row in rows:
+                ticks = round(float(row.get("source_offset_seconds", 0.0))
+                              * rate["numerator"] / rate["denominator"])
+                wanted.append((ticks, row.get("ease_in_frames", 0), row.get("ease_out_frames", 0))
+                              if with_easing else (ticks,))
+        for row in observed:
+            ticks = row.get("source_offset_ticks")
+            measured.append((ticks, row.get("ease_in_frames"), row.get("ease_out_frames"))
+                            if with_easing else (ticks,))
+        known = [entry for entry in measured
+                 if all(type(value) is int and value >= 0 for value in entry)]
+        if len(observed) != len(rows):
+            trim_status = "FAIL"
+        elif not valid_rate:
+            trim_status = "INCOMPLETE"
+        elif Counter(known) - Counter(wanted):
+            trim_status = "FAIL"
+        elif len(known) != len(measured):
+            trim_status = "INCOMPLETE"
+        else:
+            trim_status = _status_from_bool(Counter(known) == Counter(wanted))
+        _check(
+            checks, f"audio.source_trim.{index}", "AUDIO_EVENT", trim_status,
+            {"identity": identity, "source_seconds": [row.get("source_offset_seconds", 0.0)
+                                                     for row in rows],
+             "quantized_tick_values": wanted},
+            {"tick_resolution": rate, "observed_tick_values": measured},
+            "Native source clip offsets must match source-derived sequence ticks; "
+            "this does not establish audible playback equivalence.",
+        )
+
     exp_markers = _sorted(expected.get("markers", []), ("frame", "label"))
     act_markers = _sorted(actual.get("markers", []), ("frame", "label"))
     _check(

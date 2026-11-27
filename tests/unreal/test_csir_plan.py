@@ -411,3 +411,43 @@ def test_audio_plan_and_expectation_preserve_overlapping_clip_easing():
     expected = validation_expectation.build_expectation(csir, mapping)["audio_sections"]
     assert [(a["ease_in_frames"], a["ease_out_frames"]) for a in expected] == [
         (0, 60), (60, 0)]
+
+
+@pytest.mark.parametrize("offset,speed,native,expected", [
+    (0.5, 1.0, {}, 0.5),
+    (None, 1.0, {"clip_in_seconds": 0.25}, 0.25),
+    (0.0, 1.0, {}, 0.0),
+])
+def test_audio_source_trim_preserves_canonical_and_legacy_clip_in(offset, speed, native, expected):
+    section = {"time_scale": speed, "native_payload": native}
+    if offset is not None:
+        section["source_offset"] = _rt(offset)
+    assert csir_plan.audio_source_offset_seconds(section) == expected
+
+
+@pytest.mark.parametrize("section", [
+    {"source_offset": _rt(-0.5)},
+    {"source_offset": _rt(0.5), "native_payload": {"clip_in_seconds": 0.1}},
+    {"time_scale": 1.5},
+    {"time_scale": 1.0, "native_payload": {"time_scale": 0.5}},
+    {"time_scale": float("nan")},
+])
+def test_audio_source_timing_refuses_invalid_or_unmapped_speed(section):
+    with pytest.raises(csir_plan.PlanError):
+        csir_plan.audio_source_offset_seconds(section)
+
+
+def test_audio_source_trim_survives_plan_and_expectation():
+    import validation_expectation
+
+    csir, mapping = _fixture()
+    csir["tracks"].append({
+        "name": "Trimmed sound", "ced_type": "audio.track", "binding_entity_id": "",
+        "sections": [{"start": _rt(2.0), "end": _rt(4.0), "source_offset": _rt(0.5),
+                      "payload": {"asset_id": "audio"}}],
+    })
+    action = next(a for a in csir_plan.build_plan(csir, mapping)["actions"] if a["kind"] == "audio")
+    assert action["source_offset_seconds"] == 0.5
+    assert action["start_frame"] == 120 and action["end_frame"] == 240
+    expected = validation_expectation.build_expectation(csir, mapping)["audio_sections"][0]
+    assert expected["source_offset_seconds"] == 0.5

@@ -454,3 +454,34 @@ def test_audio_easing_requires_independent_occurrence_readback(case, expected_st
     easing = next(item for item in report["checks"] if item["id"].startswith("audio.easing."))
     assert easing["status"] == expected_status
     assert report["status"] == expected_status
+
+
+@pytest.mark.parametrize("case,expected_status", [
+    ("match", "PASS"), ("wrong", "FAIL"), ("missing", "INCOMPLETE"),
+    ("no_rate", "INCOMPLETE"), ("duplicate_swapped", "FAIL"),
+])
+def test_audio_source_trim_uses_native_ticks_and_occurrence_identity(case, expected_status):
+    expected = _snapshot()
+    first = expected["audio_sections"][0]
+    first.update(source_offset_seconds=0.5)
+    if case == "duplicate_swapped":
+        first.update(ease_in_frames=2, ease_out_frames=4)
+        expected["audio_sections"].append({
+            **first, "source_offset_seconds": 0.25, "ease_in_frames": 8})
+    actual = copy.deepcopy(expected)
+    actual["audio_tick_resolution"] = {"numerator": 24000, "denominator": 1}
+    observed = actual["audio_sections"]
+    observed[0]["source_offset_ticks"] = 12000
+    if case == "wrong":
+        observed[0]["source_offset_ticks"] = 12
+    elif case == "missing":
+        observed[0]["source_offset_ticks"] = None
+    elif case == "no_rate":
+        actual.pop("audio_tick_resolution")
+    elif case == "duplicate_swapped":
+        observed[0]["source_offset_ticks"] = 6000
+        observed[1]["source_offset_ticks"] = 12000
+    result = core.compare(expected, actual)
+    trim = next(row for row in result["checks"] if row["id"].startswith("audio.source_trim."))
+    assert trim["status"] == expected_status
+    assert result["status"] == expected_status

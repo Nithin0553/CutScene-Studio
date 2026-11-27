@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 UNREAL_INTEGRATION = ROOT / "integrations" / "unreal"
 sys.path.insert(0, str(UNREAL_INTEGRATION))
@@ -360,3 +362,52 @@ def test_output_gate_does_not_reuse_live_unity_camera_aspect() -> None:
     assert plan["output_resolution"] == [1920, 1080]
     assert abs(plan["output_aspect"] - (16.0 / 9.0)) < 1e-9
     assert plan["output_profile_source"] == "benchmark_default_1920x1080"
+
+
+@pytest.mark.parametrize("native,authored,expected", [
+    ({"blend_in_seconds": 0.75, "ease_in_seconds": 0.25}, 0.25, 0.75),
+    ({"blend_in_seconds": -1.0, "ease_in_seconds": 0.25}, 0.25, 0.25),
+    ({"blend_in_seconds": 0.0, "ease_in_seconds": 0.0}, 0.5, 0.5),
+    ({}, 0.5, 0.5),
+])
+def test_audio_fade_uses_native_overlap_and_legacy_evidence(native, authored, expected):
+    section = {"native_payload": native, "payload": {"audio": {
+        "fade_in": {"duration_seconds": authored}}}}
+    assert csir_plan.audio_fade_seconds(section, "in") == expected
+
+
+@pytest.mark.parametrize("native,authored", [
+    ({"blend_in_seconds": -2}, 0),
+    ({"ease_in_seconds": -1}, 0),
+    ({"blend_in_seconds": float("inf")}, 0),
+    ({}, -0.25),
+    ({}, float("nan")),
+])
+def test_audio_fade_rejects_malformed_source(native, authored):
+    section = {"native_payload": native, "payload": {"audio": {
+        "fade_in": {"duration_seconds": authored}}}}
+    with pytest.raises(csir_plan.PlanError):
+        csir_plan.audio_fade_seconds(section, "in")
+
+
+def test_audio_plan_and_expectation_preserve_overlapping_clip_easing():
+    import validation_expectation
+
+    csir, mapping = _fixture()
+    csir["tracks"].append({
+        "name": "Source audio", "ced_type": "audio.track", "binding_entity_id": "",
+        "sections": [
+            {"start": _rt(0.0), "end": _rt(5.0),
+             "payload": {"asset_id": "audio"},
+             "native_payload": {"blend_out_seconds": 1.0, "ease_out_seconds": 0.1}},
+            {"start": _rt(4.0), "end": _rt(8.0),
+             "payload": {"asset_id": "audio"},
+             "native_payload": {"blend_in_seconds": 1.0, "ease_in_seconds": 0.2}},
+        ],
+    })
+    actions = [a for a in csir_plan.build_plan(csir, mapping)["actions"] if a["kind"] == "audio"]
+    assert [(a["fade_in_seconds"], a["fade_out_seconds"]) for a in actions] == [
+        (0.0, 1.0), (1.0, 0.0)]
+    expected = validation_expectation.build_expectation(csir, mapping)["audio_sections"]
+    assert [(a["ease_in_frames"], a["ease_out_frames"]) for a in expected] == [
+        (0, 60), (60, 0)]

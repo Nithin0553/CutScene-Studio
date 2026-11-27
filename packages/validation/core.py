@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from typing import Any, Iterable, Mapping
 
 
@@ -737,6 +738,42 @@ def compare(
         act_audio,
         "Mapped audio asset and timing must match exactly.",
     )
+
+    # Match easing pairs as a multiset within exact audio identity. Distinct
+    # clips can share timing and asset identity; one readback cannot satisfy
+    # two authored occurrences, nor can in/out values from different clips
+    # be combined into an invented successful measurement.
+    audio_identity = ("start_frame", "end_frame", "asset_path", "loop")
+    exp_groups: dict[tuple[Any, ...], list[JsonObject]] = {}
+    act_groups: dict[tuple[Any, ...], list[JsonObject]] = {}
+    for rows, groups in ((expected.get("audio_sections", []), exp_groups),
+                         (actual.get("audio_sections", []), act_groups)):
+        for row in rows:
+            identity = tuple(row.get(field) for field in audio_identity)
+            groups.setdefault(identity, []).append(row)
+    for index, (identity, rows) in enumerate(exp_groups.items()):
+        if not any("ease_in_frames" in row or "ease_out_frames" in row for row in rows):
+            continue
+        expected_pairs = [(row.get("ease_in_frames", 0), row.get("ease_out_frames", 0))
+                          for row in rows]
+        observed_pairs = [(row.get("ease_in_frames"), row.get("ease_out_frames"))
+                          for row in act_groups.get(identity, [])]
+        known = [pair for pair in observed_pairs
+                 if all(type(value) is int and value >= 0 for value in pair)]
+        unexpected = Counter(known) - Counter(expected_pairs)
+        if len(observed_pairs) != len(expected_pairs) or unexpected:
+            easing_status = "FAIL"
+        elif len(known) != len(observed_pairs):
+            easing_status = "INCOMPLETE"
+        else:
+            easing_status = _status_from_bool(Counter(known) == Counter(expected_pairs))
+        _check(
+            checks, f"audio.easing.{index}", "AUDIO_EVENT", easing_status,
+            {"identity": identity, "duration_pairs": expected_pairs},
+            {"identity": identity, "duration_pairs": observed_pairs},
+            "Native effective audio easing durations must match source-derived frames; "
+            "this does not establish waveform, envelope shape or mixing parity.",
+        )
 
     exp_markers = _sorted(expected.get("markers", []), ("frame", "label"))
     act_markers = _sorted(actual.get("markers", []), ("frame", "label"))

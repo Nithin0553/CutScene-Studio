@@ -606,6 +606,20 @@ def _light_intensity_track(track: Any) -> dict[str, Any] | None:
     }
 
 
+def _audio_easing_frames(section: Any, side: str) -> int | None:
+    """Read the native effective section duration; unavailable is not zero."""
+    extension = getattr(unreal, "MovieSceneSectionEasingExtensions", None)
+    getter = getattr(extension, f"get_ease_{side}_duration", None)
+    if callable(getter):
+        try:
+            value = getter(section)
+            if type(value) is int and value >= 0:
+                return value
+        except Exception:
+            pass
+    return None
+
+
 def _audio_section(section: Any) -> dict[str, Any]:
     start, end = _section_range(section)
     sound = None
@@ -636,6 +650,8 @@ def _audio_section(section: Any) -> dict[str, Any]:
         "end_frame": end,
         "asset_path": _asset_path(sound),
         "loop": loop,
+        "ease_in_frames": _audio_easing_frames(section, "in"),
+        "ease_out_frames": _audio_easing_frames(section, "out"),
     }
 
 

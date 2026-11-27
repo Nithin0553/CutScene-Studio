@@ -179,14 +179,24 @@ def build_expectation(
             )
 
         elif kind == "audio":
-            audio_sections.append(
-                {
-                    "start_frame": int(action["start_frame"]),
-                    "end_frame": int(action["end_frame"]),
-                    "asset_path": str(action["unreal_asset_path"]),
-                    "loop": bool(action.get("loop", False)),
-                }
-            )
+            audio: dict[str, Any] = {
+                "start_frame": int(action["start_frame"]),
+                "end_frame": int(action["end_frame"]),
+                "asset_path": str(action["unreal_asset_path"]),
+                "loop": bool(action.get("loop", False)),
+            }
+            # Legacy snapshots with no authored fades remain comparable.
+            # For authored transitions require both native duration values.
+            if any(float(action.get(field, 0.0)) > 0 for field in (
+                "fade_in_seconds", "fade_out_seconds"
+            )):
+                fps = (float(plan["display_rate"]["numerator"])
+                       / float(plan["display_rate"]["denominator"]))
+                for side in ("in", "out"):
+                    audio[f"ease_{side}_frames"] = int(
+                        round(float(action.get(f"fade_{side}_seconds", 0.0)) * fps)
+                    )
+            audio_sections.append(audio)
 
         elif kind == "marker":
             markers.append(

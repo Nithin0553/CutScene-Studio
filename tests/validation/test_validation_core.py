@@ -2,6 +2,8 @@ import copy
 import sys
 from pathlib import Path
 
+import pytest
+
 VALIDATION_DIR = Path(__file__).resolve().parents[2] / "packages" / "validation"
 sys.path.insert(0, str(VALIDATION_DIR))
 
@@ -420,3 +422,35 @@ def test_invalid_or_missing_static_vector_cannot_be_reported_as_pass() -> None:
     assert checks["spatial.rotation.Floor"]["status"] == "INCOMPLETE"
     assert checks["spatial.scale.Floor"]["status"] == "PASS"
     assert report["status"] == "INCOMPLETE"
+
+
+@pytest.mark.parametrize("case,expected_status", [
+    ("matching", "PASS"), ("lost_fade", "FAIL"), ("missing_api", "INCOMPLETE"),
+    ("duplicate_match", "PASS"), ("duplicate_reuse", "FAIL"),
+    ("crossed_pairs", "FAIL"), ("unexpected_extra", "FAIL"),
+])
+def test_audio_easing_requires_independent_occurrence_readback(case, expected_status):
+    expected = _snapshot()
+    first = expected["audio_sections"][0]
+    first.update(ease_in_frames=12, ease_out_frames=24)
+    if case.startswith("duplicate") or case == "crossed_pairs":
+        expected["audio_sections"].append({**first, "ease_in_frames": 6, "ease_out_frames": 8})
+    actual = copy.deepcopy(expected)
+    observed = actual["audio_sections"]
+    if case == "lost_fade":
+        observed[0]["ease_in_frames"] = 0
+    elif case == "missing_api":
+        observed[0]["ease_out_frames"] = None
+    elif case == "duplicate_match":
+        observed.reverse()
+    elif case == "duplicate_reuse":
+        observed[1] = observed[0].copy()
+    elif case == "crossed_pairs":
+        observed[0]["ease_out_frames"], observed[1]["ease_out_frames"] = (
+            observed[1]["ease_out_frames"], observed[0]["ease_out_frames"])
+    elif case == "unexpected_extra":
+        observed.append(observed[0].copy())
+    report = core.compare(expected, actual)
+    easing = next(item for item in report["checks"] if item["id"].startswith("audio.easing."))
+    assert easing["status"] == expected_status
+    assert report["status"] == expected_status

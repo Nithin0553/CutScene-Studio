@@ -40,6 +40,24 @@ def timeline_clip_easing_seconds(native_payload: dict[str, Any], side: str) -> f
     return blend if blend > 0.0 else ease
 
 
+def audio_fade_seconds(section: dict[str, Any], side: str) -> float:
+    """Resolve source audio overlap/ease evidence, retaining legacy CSIR fades."""
+    if side not in {"in", "out"}:
+        raise PlanError("Invalid audio fade direction.")
+    native = section.get("native_payload") or {}
+    fade = (section.get("payload", {}).get("audio", {}).get(f"fade_{side}") or {})
+    try:
+        authored = float(fade.get("duration_seconds", 0.0) or 0.0)
+    except (TypeError, ValueError) as exc:
+        raise PlanError("Invalid source audio fade duration.") from exc
+    if not math.isfinite(authored) or authored < 0:
+        raise PlanError("Invalid source audio fade duration.")
+    if f"blend_{side}_seconds" in native or f"ease_{side}_seconds" in native:
+        native_duration = timeline_clip_easing_seconds(native, side)
+        return native_duration if native_duration > 0 else authored
+    return authored
+
+
 def load_json(path: str | Path) -> dict[str, Any]:
     # Accept BOM-prefixed UTF-8 from Windows PowerShell and ordinary UTF-8 alike.
     with Path(path).open("r", encoding="utf-8-sig") as handle:
@@ -956,8 +974,8 @@ def build_plan(csir: dict[str, Any], mapping: dict[str, Any]) -> dict[str, Any]:
                 plan["actions"].append(
                     {
                         "kind": "audio",
-                        "fade_in_seconds": float(section.get("payload", {}).get("audio", {}).get("fade_in", {}).get("duration_seconds", 0.0) or 0.0),
-                        "fade_out_seconds": float(section.get("payload", {}).get("audio", {}).get("fade_out", {}).get("duration_seconds", 0.0) or 0.0),
+                        "fade_in_seconds": audio_fade_seconds(section, "in"),
+                        "fade_out_seconds": audio_fade_seconds(section, "out"),
                         "unreal_asset_path": _mapping_asset(mapping, asset["name"]),
                         "start_frame": seconds_to_frame(rational_seconds(section["start"]), fps_n, fps_d),
                         "end_frame": seconds_to_frame(rational_seconds(section["end"]), fps_n, fps_d),

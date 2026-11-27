@@ -77,3 +77,19 @@ def test_unsupported_or_ambiguous_keys_do_not_prove_static_world_pose(
 def test_attached_actor_cannot_mislabel_local_key_as_world(static_pose_helper):
     assert static_pose_helper([_track()], FakeActor(parent=object())) is None
     assert static_pose_helper([_track()], object()) is None
+
+
+@pytest.mark.parametrize("value,expected", [(12, 12), (0, 0), (-1, None), (None, None), (True, None)])
+def test_audio_easing_native_readback_does_not_invent_values(monkeypatch, value, expected):
+    fake = types.ModuleType("unreal")
+    fake.MovieSceneSectionEasingExtensions = types.SimpleNamespace(
+        get_ease_in_duration=lambda section: value)
+    monkeypatch.setitem(sys.modules, "unreal", fake)
+    monkeypatch.setitem(sys.modules, "unreal_compat", types.ModuleType("unreal_compat"))
+    file = Path(__file__).resolve().parents[2] / "integrations/unreal/readback_level_sequence.py"
+    spec = importlib.util.spec_from_file_location("_audio_easing_reader_test", file)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module._audio_easing_frames(object(), "in") == expected
+    assert module._audio_easing_frames(object(), "out") is None

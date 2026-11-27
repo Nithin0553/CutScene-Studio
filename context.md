@@ -83,6 +83,13 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Memory readiness verified; benchmark audio adapter and readback
+
+- Owner confirmed at 7fdcf50: 252 targeted Python passes in 123.29 s, Node syntax and all 23 UI scenarios passed, Ruff clean. Existing fresh-map and approval checkpoints remain verified by software tests only. Draft PR #1 open. Full suite last confirmed 822 passes / seven known external skips.
+- Audited benchmark specs, CED dispatch/capabilities, source analysis retrieval, Unity audio extraction, deterministic csir_plan, native audio builder, independent readback, source expectation and comparison. B002 needs audio overlaps/fades; Unity already captures clip overlap/ease durations in native_payload and explicit fades in audio payload; old planner ignored overlap duration. Existing native builder applies section easing; old validator compared audio asset/range/loop only. Epic UE 5.8 docs confirm native effective easing getters (https://dev.epicgames.com/documentation/en-us/unreal-engine/python-api/class/MovieSceneSectionEasingExtensions).
+- Added source-driven audio fade resolution (native positive overlap takes precedence; legacy explicit fades preserved; negative/nonfinite input rejected), native audio easing duration readback (missing/invalid is unknown), source-derived expectation and occurrence-preserving comparison of fade pairs for authored transitions. Duplicate asset/time clips cannot reuse one readback or combine different in/out pairs. Validation marks wrong values FAIL and absent measurement INCOMPLETE. Existing builder and CED KNOWN_PARTIAL remain unchanged; no claim of waveform, envelope shape, spatial mixing, clip offset/time scale or signal execution parity. Historical evidence is not rewritten; reprepare fresh candidates if changed source-derived plan causes immutable replay mismatch.
+- Added 22 software test cases (10 planner/expectation, 7 comparison, 5 readback). Tests not run remotely. Target these three test modules plus transfer backend, prepared transfer and benchmark parity tests; then run full suite to catch cross-module changes. Node unchanged. Next audit audio source trim/time scale and event payload/remaining light/animation/material coverage, then bounded CineTwin repair. No native generation or fidelity verified. Keep engines and Ollama closed.
+
 ### 2026-11-26 — Fresh-map lint confirmed; Ollama memory lifecycle gate
 
 - Owner confirmed all narrow Ruff and affected native preflight/worker tests passed after f473ea9; exact narrow test count not supplied. Most recent ordered suite remains 217 passes in 125.71 s and 22 Node scenarios. PR #1 open draft.

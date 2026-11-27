@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Automatic dependency discovery verified in actual Unreal bundled Python
+
+- Owner supplied direct verifier output with no manual dependency path configuration: AI_EVIDENCE_REPLAY_VERIFIED under UE bundled CPython 3.11.8. Identical session 33c2df7eb818ad86a5a6, source/analysis and all four artifact hashes, 17 canonical modules, five attributed proposals, two unsupported, zero failed/not analyzed, 21 backend actions, verified automatic setup with 11 actors, five imports and seven Cube references. All execution/fidelity flags false. This confirms standalone automatic bootstrap on the installed runtime, not editor-embedded compatibility.
+- Four newly added bootstrap regression results still not supplied. Last confirmed full baseline 822 passed / seven external Stage 4 skips; expected 826 if unchanged. Next confirm targeted test_studio_planner_sync.py, then implement candidate-bound embedded-editor read-only preflight and explicit native authorization integration. Retain preparation-only gates until tested. No application code changes in this checkpoint; no editor or model launch needed.
+
 ### 2026-11-26 — 822-test baseline passed; automatic local AI dependency bootstrap
 
 - Owner confirmed full Windows regression after HTTP correction: 822 passed, seven known external Stage 4 fixture skips, zero failures in 135.02 s. Eight verifier cases and two new HTTP cases pass. This is the latest confirmed clean Python baseline; earlier Node baseline 18 scenarios. Cross-runtime saved candidate replay previously passed under Studio Python 3.12.10 and UE bundled Python 3.11.8.

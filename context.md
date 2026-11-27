@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Live automatic setup evidence and scene binding limitation
+
+- Owner confirmed active-job.json absent in isolated live workspace and supplied automatic_setup: available true, ready true, blockers empty, five planned imports, four planned actors. Warnings: 16 source entities lack independent target actor bindings; basic embedded FBX materials only, Unity .mat/shader graphs/URP/sky/ambient unmapped; MOVING_PROP mesh identity not found (transform-only); URP runtime Lit.mat unresolved (UNSUPPORTED_OR_UNSAFE_SOURCE_PATH); target skeletons/materials/animation remain unverified. No actual imports or actors created.
+- Inspected tools/studio_project_discovery.py _source_mapping: discovery selects active track-bound character/camera/prop/light entities and directly attached child props, not the whole scene. The earlier Benchmark001 example mapping explicitly binds ten named actors including Floor, four walls and Landmark_Pillar. This explains why the discovery path can have fewer environment bindings; precise 13 vs 17 action difference still requires actual plan comparison. Unmapped source entities may include component/rig children, so do not promote every entity into an independent actor or claim 20% fidelity. Next inspect live session/plan/coverage/handoff/mapping and source entity identities with read-only commands; then address safe source-grounded scene reconstruction alongside native verifier integration. No application changes; native execution gate remains closed.
+
 ### 2026-11-26 — Live Studio AI preparation succeeded in explicit best-effort mode
 
 - Owner supplied actual Studio screenshot showing AI_PREPARED, Source analysis and verified candidate: five proposed mappings, two withheld, failed/not analyzed 0/0, 13 planned actions, 186 active source CED alerts, ten partial native source snapshots. Native AI verifier integration pending; no native changes performed, fidelity unverified. The preceding strict census block identified two AudioListener components; best-effort preparation retains these limitations. This confirms live UI/host/model preparation at the screenshot level; raw candidate artifacts not yet inspected.

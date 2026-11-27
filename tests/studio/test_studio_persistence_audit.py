@@ -141,6 +141,21 @@ def test_unknown_track_readback_is_incomplete_not_success(tmp_path):
     assert result["status"] == "STRUCTURAL_READBACK_INCOMPLETE"
 
 
+def test_native_enumeration_exception_remains_incomplete(tmp_path, caplog):
+    _root, jobfile, candidate, fake, assets, _actors = fixture(tmp_path)
+
+    def unavailable():
+        raise RuntimeError("Native binding enumeration failed")
+
+    assets["/Game/Testing/LS_New"].get_bindings = unavailable
+    with caplog.at_level("DEBUG"):
+        result = AUDIT.audit(jobfile, candidate / "audit.json", unreal_api=fake)
+    assert result["status"] == "STRUCTURAL_READBACK_INCOMPLETE"
+    assert result["sequence"]["binding_count"] is None
+    assert result["sequence"]["root_track_count"] == 2
+    assert "Native sequence readback unavailable: binding_count" in caplog.text
+
+
 def test_duplicate_actor_is_failure(tmp_path):
     _root, jobfile, candidate, fake, _assets, actors = fixture(tmp_path)
     actors.append(Actor("CSAI_CAM", "CineCameraActor"))

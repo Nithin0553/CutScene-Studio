@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import ntpath
 import os
 import sys
 from pathlib import Path
 from typing import Any
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class PersistenceAuditError(RuntimeError):
@@ -80,6 +84,7 @@ def _checks(sequence: Any, api: Any) -> dict[str, Any]:
                     len(list(extension_getter(sequence))) if callable(extension_getter) else None
                 )
         except Exception:
+            LOGGER.debug("Native sequence readback unavailable: %s", name, exc_info=True)
             observed[name] = None
     return observed
 

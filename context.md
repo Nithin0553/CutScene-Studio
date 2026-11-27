@@ -83,6 +83,12 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-27 — Static lighting persistence audit lint correction
+
+- Owner reported one remaining Ruff BLE001 diagnostic at 2a34ad6 in the existing native sequence enumeration exception handler. No static lighting Python regression result supplied yet; latest confirmed conversion suite remains 224 passes.
+- Added contextual debug logging with exception details while preserving None for unavailable binding/track measurements, independent readback and the INCOMPLETE status. No lint suppression or weakened verification. Added one regression for a throwing native enumeration accessor, verifying that other measurements remain available and the failure is logged.
+- Correction pushed but not locally executed; rerun the five-file Ruff check and six-module static lighting regression from the preceding checkpoint. Keep engines/Ollama closed. No new native evidence or architecture changes.
+
 ### 2026-11-27 — Bounded lighting regression verified; source static light properties
 
 - Owner confirmed 2dba115: Ruff and 224 targeted Python cases passed; duration not supplied. Previous host/provider suite 252 passed and Node 23; counts overlap, not full suite. PR #1 open draft.

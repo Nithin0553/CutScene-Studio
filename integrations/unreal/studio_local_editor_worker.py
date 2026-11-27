@@ -79,11 +79,18 @@ def _ensure_target_level(job):
         if _loaded_level() != expected:
             raise RuntimeError('Wrong Unreal level is loaded.')
         return
+    if job.get('ai_authorization'):
+        import studio_ai_native_preflight as inspector
+
+        if _loaded_level() != job.get('ai_approved_observed_level'):
+            raise RuntimeError('Loaded Unreal level changed after AI authorization.')
+        inspector.preflight_new_level(unreal, expected_project=job['expected_project'],
+                                      expected_level=expected, observed_level=_loaded_level())
     if expected != '/Game/CutSceneAI/AutoTransfer/L_Studio_Fresh':
         raise RuntimeError('Refusing noncanonical automatic level path.')
     if unreal.EditorAssetLibrary.does_asset_exist(expected):
         raise RuntimeError('Target level already exists. Reconnect and use the existing map; no overwrite.')
-    if _world_has_unsaved_changes():
+    if not job.get('ai_authorization') and _world_has_unsaved_changes():
         raise RuntimeError('Current Unreal map contains unsaved changes. Save it before automatic level creation.')
     # UE 5.8 supports LevelEditorSubsystem.new_level. It replaces the current
     # world without saving; the guard above prevents silent loss of edits.
@@ -369,7 +376,8 @@ def _verify_and_claim_ai_execution(job, candidate_dir):
     active_job = _load(WORKSPACE / 'active-job.json')
     if (active_job.get('job_id') != job_id
             or candidate_dir != (WORKSPACE / 'candidates' / candidate_id).resolve()
-            or job.get('automatic_setup') is not True or job.get('create_level') is not False
+            or job.get('automatic_setup') is not True
+            or job.get('create_level') is not bool(config.get('auto_create_level'))
             or Path(job['automatic_setup_manifest']).resolve() != candidate_dir / 'automatic-setup.json'
             or job['csir'] != config['csir'] or job.get('capture') != config.get('capture')
             or job['mapping'] != session['target']['mapping_path']
@@ -387,9 +395,10 @@ def _verify_and_claim_ai_execution(job, candidate_dir):
         raise RuntimeError('AI candidate authorization was already consumed.')
     # Fresh independent replay includes source asset manifest verification,
     # native project/level checks, collision checks and primitive mesh preflight.
+    new_map_options = {'create_level': True} if job.get('create_level') else {}
     proof = inspector.inspect_candidate(
         candidate_dir, expected_project=job['expected_project'],
-        expected_level=job['expected_level'], unreal_api=unreal)
+        expected_level=job['expected_level'], unreal_api=unreal, **new_map_options)
     auth.match_fresh_proof(report, proof)
     current_hash, _, _, _ = auth.validate(
         WORKSPACE, candidate_id, WORKER_INSTANCE_ID, WORKER_SOURCE_SHA256, approval_id)
@@ -399,6 +408,8 @@ def _verify_and_claim_ai_execution(job, candidate_dir):
     with claim.open('x', encoding='utf-8') as stream:
         stream.write(job_id + '\n')
     job['ai_execution_preflight_verified'] = True
+    if job.get('create_level'):
+        job['ai_approved_observed_level'] = report['observed_level']
 
 
 def inspect_active_ai_candidate(request=None):
@@ -438,10 +449,18 @@ def inspect_active_ai_candidate(request=None):
     if Path(getattr(studio_ai_native_preflight, '__file__', '')).resolve() != expected:
         raise RuntimeError('Wrong AI native preflight checkout; restart Unreal Editor.')
     importlib.reload(studio_ai_native_preflight)
+    new_map_options = {'create_level': True} if config.get('auto_create_level') else {}
+    if new_map_options and request is not None and (
+            request.get('create_level') is not True
+            or request.get('expected_level') != config['level_path']
+            or request.get('observed_level') != _loaded_level()):
+        raise RuntimeError('New-map request no longer matches the loaded Unreal world.')
     proof = studio_ai_native_preflight.inspect_candidate(
         folder, expected_project=config['target_project'],
-        expected_level=config['level_path'], unreal_api=unreal,
+        expected_level=config['level_path'], unreal_api=unreal, **new_map_options,
     )
+    if new_map_options and request is not None and proof.get('observed_level') != request['observed_level']:
+        raise RuntimeError('Loaded world changed during new-map inspection.')
     if (active_path.read_bytes() != active_bytes
             or config_path.read_bytes() != config_bytes):
         raise RuntimeError('Studio connection or candidate changed during native preflight.')

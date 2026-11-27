@@ -220,9 +220,13 @@ def request_ai_native_preflight(candidate_id: str, folder: Path = WORKSPACE) -> 
     stale = worker_code_mismatch(worker)
     if stale:
         raise ValueError(stale)
+    create_level = bool(config.get('auto_create_level'))
     if (os.path.normcase(str(worker.get('project') or '')) != os.path.normcase(config['target_project'])
-            or worker.get('level') != config['level_path']):
-        raise ValueError('Open the selected existing staging level first.')
+            or (not create_level and worker.get('level') != config['level_path'])):
+        raise ValueError('Open the selected staging project and level first.')
+    if create_level and (not worker.get('level') or worker.get('level') == config['level_path']
+                         or not _ai_auth_module().fresh_map_path_available(config)):
+        raise ValueError('Fresh target map is not available; reconnect to inspect the destination.')
     request_path = folder / 'ai-native-preflight-request.json'
     if request_path.is_file():
         prior = load_json(request_path)
@@ -231,6 +235,7 @@ def request_ai_native_preflight(candidate_id: str, folder: Path = WORKSPACE) -> 
         response = load_json(response_path) if response_path.is_file() else {}
         if (0 <= age < AI_PREFLIGHT_MAX_AGE_SECONDS
                 and prior.get('worker_instance_id') == worker['worker_instance_id']
+                and (not create_level or prior.get('observed_level') == worker.get('level'))
                 and response.get('request_id') != prior.get('request_id')
                 and prior.get('candidate_record_sha256') == hashlib.sha256(active_bytes).hexdigest()
                 and prior.get('connection_sha256') == hashlib.sha256(connection_bytes).hexdigest()):
@@ -245,6 +250,9 @@ def request_ai_native_preflight(candidate_id: str, folder: Path = WORKSPACE) -> 
         'connection_sha256': hashlib.sha256(connection_bytes).hexdigest(),
         'requested_at': datetime.now(UTC).isoformat(),
     }
+    if create_level:
+        request.update(create_level=True, expected_level=config['level_path'],
+                       observed_level=worker['level'])
     # Invalidate old reports before publishing the new request.
     (folder / 'ai-native-preflight.json').unlink(missing_ok=True)
     atomic_json(request_path, request)
@@ -297,7 +305,8 @@ def ai_native_preflight_status(folder: Path = WORKSPACE) -> dict[str, Any]:
             request_age = (datetime.now(UTC) - datetime.fromisoformat(request['requested_at'])).total_seconds()
             if (request.get('worker_instance_id') != worker.get('worker_instance_id')
                     or request.get('candidate_record_sha256') != active_hash
-                    or request.get('connection_sha256') != config_hash):
+                    or request.get('connection_sha256') != config_hash
+                    or (config.get('auto_create_level') and request.get('observed_level') != worker.get('level'))):
                 return blocked('Inspection request no longer matches the active editor or candidate.')
             response_path = folder / 'ai-native-preflight-response.json'
             response = load_json(response_path) if response_path.is_file() else {}
@@ -332,8 +341,8 @@ def ai_native_preflight_status(folder: Path = WORKSPACE) -> dict[str, Any]:
         expected = os.path.normcase(config['target_project'])
         if (os.path.normcase(str(worker.get('project') or '')) != expected
                 or os.path.normcase(str(report.get('observed_project') or '')) != expected
-                or worker.get('level') != config['level_path']
-                or report.get('observed_level') != config['level_path']):
+                or worker.get('level') != report.get('observed_level')
+                or not _ai_auth_module().level_binding_matches(config, request or {}, report)):
             return blocked('Loaded Unreal project or level changed after inspection.')
         session, session_hash = snapshot(candidate / 'session.json')
         if (not session.get('ai_analysis')
@@ -814,7 +823,8 @@ def queue_trial(candidate_id: str, folder: Path = WORKSPACE, *, approval_id: str
         current_hash, _, _, _ = auth.validate(
             folder, candidate_id, heartbeat.get('worker_instance_id'),
             heartbeat.get('worker_source_sha256'), approval_id)
-        if current_hash != ai_authorization['approval_sha256'] or (folder / 'active-job.json').exists():
+        if (current_hash != ai_authorization['approval_sha256'] or (folder / 'active-job.json').exists()
+                or ai_native_preflight_status(folder).get('verified') is not True):
             raise ValueError('AI execution authorization changed or another job is active.')
         job['ai_authorization'] = ai_authorization
     atomic_json(folder / 'jobs' / (job_id + '.json'), job)

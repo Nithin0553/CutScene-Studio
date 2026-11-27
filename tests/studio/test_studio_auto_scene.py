@@ -499,6 +499,8 @@ def test_builtin_cube_identity_does_not_guess_from_names(change):
 @pytest.mark.parametrize("case", [
     "valid", "unbound_project", "wrong_project", "wrong_level", "namespace",
     "sequence", "asset", "actor", "wrong_bounds",
+    "new_valid", "new_dirty", "new_unknown_dirty", "new_exists", "new_disk_exists",
+    "new_external_content", "new_wrong_path", "new_missing_api", "new_current_actor",
 ])
 def test_read_only_ai_native_setup_preflight(tmp_path, monkeypatch, case):
     import studio_ai_native_preflight as preflight
@@ -559,6 +561,26 @@ def test_read_only_ai_native_setup_preflight(tmp_path, monkeypatch, case):
     if case == 'actor':
         fake.actor_sys.actors.append(Actor('Floor'))
 
+    new_level = case.startswith('new_')
+    mutations = []
+    if new_level:
+        fake.world.get_outermost = lambda: SimpleNamespace(is_dirty=lambda: case == 'new_dirty')
+        fake.EditorAssetLibrary.make_directory = lambda path: mutations.append(path)
+        if case != 'new_missing_api':
+            fake.levelsaver.new_level = lambda path: mutations.append(path)
+        if case == 'new_unknown_dirty':
+            del fake.world.get_outermost
+        if case == 'new_exists':
+            fake.assets[preflight.FRESH_LEVEL] = Asset('World', preflight.FRESH_LEVEL)
+        if case == 'new_disk_exists':
+            target = tmp_path / 'Content/CutSceneAI/AutoTransfer/L_Studio_Fresh.umap'
+            target.parent.mkdir(parents=True)
+            target.write_text('existing map')
+        if case == 'new_external_content':
+            (tmp_path / 'Content/__ExternalActors__/CutSceneAI/AutoTransfer/L_Studio_Fresh').mkdir(parents=True)
+        if case == 'new_current_actor':
+            fake.actor_sys.actors.append(Actor('Floor'))
+
     before = {p: p.read_bytes() for p in candidate.iterdir()}
     before_assets = dict(fake.assets)
     before_actors = list(fake.actor_sys.actors)
@@ -567,8 +589,16 @@ def test_read_only_ai_native_setup_preflight(tmp_path, monkeypatch, case):
         'expected_level': '/Game/Tests/L_Test',
         'unreal_api': fake,
     }
-    if case == 'valid':
+    if new_level:
+        kwargs.update(create_level=True, expected_level=(
+            '/Game/Wrong' if case == 'new_wrong_path' else preflight.FRESH_LEVEL))
+    if case in {'valid', 'new_valid', 'new_current_actor'}:
         result = preflight.inspect_candidate(candidate, **kwargs)
+        if new_level:
+            assert result['create_level'] is True
+            assert result['expected_level'] == preflight.FRESH_LEVEL
+            assert result['observed_level'] == '/Game/Tests/L_Test'
+            assert result['new_level_preflight']['current_world_clean'] is True
         assert result['status'] == 'AI_NATIVE_SETUP_PREFLIGHT_PASSED'
         assert result['session_id'] == 'fixture-session'
         assert result['planned_actor_count'] == 3
@@ -588,10 +618,18 @@ def test_read_only_ai_native_setup_preflight(tmp_path, monkeypatch, case):
             'asset': 'Existing target import asset',
             'actor': 'Existing actor label',
             'wrong_bounds': 'Cube bounds differ',
+            'new_dirty': 'unsaved changes',
+            'new_unknown_dirty': 'Cannot confirm',
+            'new_exists': 'Target level already exists',
+            'new_disk_exists': 'already exists on disk',
+            'new_external_content': 'already exists on disk',
+            'new_wrong_path': 'noncanonical',
+            'new_missing_api': 'level creation API unavailable',
         }[case]
-        with pytest.raises((ValueError, scene.AutomaticSetupError), match=expected):
+        with pytest.raises((ValueError, RuntimeError, scene.AutomaticSetupError), match=expected):
             preflight.inspect_candidate(candidate, **kwargs)
     assert calls == ([] if case == 'unbound_project' else [candidate])
     assert {p: p.read_bytes() for p in candidate.iterdir()} == before
     assert fake.assets == before_assets
     assert fake.actor_sys.actors == before_actors
+    assert not mutations

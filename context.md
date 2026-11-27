@@ -83,6 +83,12 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Authorization regressions passed; fresh-map integration
+
+- Owner reported all checks passed after 7f6a430 (expected 193 Python passes, 21 Node scenarios and Ruff); exact new counts/timings not separately supplied. Last full-suite baseline remains 822 passed/seven external skips. PR #1 open draft.
+- Extended existing AI inspection, authorization, host/worker and UI to support the canonical fresh-map route. Read-only checks bind proposed map and observed world, reject occupied native registry/disk paths including external actor/object directories, require known clean map state and creation API. Worker repeats inspection and checks world/target immediately before existing deterministic level creation; existing scene setup checks the new map before imports. No new architecture or arbitrary level path. Dirty/unverifiable world must be saved or inspected again.
+- Added nine mocked native inspector cases in test_studio_auto_scene.py. New software tests not yet run. Additional host/worker/UI mode regressions to follow in this checkpoint. Keep Unity, Unreal and Ollama closed. Native API behavior and actual map creation remain unverified.
+
 ### 2026-11-26 — 157 targeted regressions passed; explicit authorization test coverage
 
 - Owner confirmed same ordered six-module regression: 157 passed in 64.95 s after af4c451. Both cached mock failures resolved. Node/Ruff outputs for that revision not supplied; latest confirmed Node remains 19 scenarios, last complete Python run 822 passed/seven known external skips. PR #1 open draft at af4c451 before this update.

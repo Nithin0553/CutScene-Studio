@@ -24,7 +24,9 @@
   const canAuthorizeAI = () => Boolean(aiCandidate() && !state.job && validEditor() &&
     state.aiPreflight?.verified === true && state.aiPreflight?.request_id &&
     state.aiPreflight?.report_sha256 && state.aiPreflight?.candidate_id === state.candidate.candidate_id &&
-    state.candidate.automatic_setup?.ready && !connection()?.auto_create_level);
+    state.candidate.automatic_setup?.ready &&
+    (!connection()?.auto_create_level || (state.aiPreflight.create_level === true &&
+      state.aiPreflight.expected_level === connection().level_path)));
   const terminal = job => job && !['RUNNING','QUEUED'].includes(job.status);
   const generated = () => Boolean(state.job &&
     state.job.generation_status === 'GENERATED_UNVERIFIED' &&
@@ -222,7 +224,10 @@
       '<h3>Read-only Unreal inspection</h3>'+
        '<p class="subnote">'+esc(state.aiPreflight?.verified?'Native setup inspection passed. Import readback and execution approval remain pending.':state.aiPreflight?.reason||'Connect the selected staging level to inspect the candidate.')+'</p>'+
        button('Inspect target (read-only)','inspect-ai-target',state.busy||!validEditor()||!state.candidate.automatic_setup?.ready||state.aiPreflight?.status==='AI_NATIVE_PREFLIGHT_REQUESTED','secondary')+
-       (canAuthorizeAI()?'<p class="subnote">Authorize this exact candidate to import assets, create actors and generate a new sequence in the selected backed-up Unreal map. Fresh verification will run again; fidelity is not guaranteed.</p>'+
+       (canAuthorizeAI()?'<p class="subnote">'+(connection()?.auto_create_level?
+         'Authorize creation of the new map '+esc(connection().level_path)+'. The current world must be clean; it will be replaced in the editor without overwriting its saved map. ':
+         'Authorize this exact candidate in the selected backed-up Unreal map. ')+
+         'Assets will be imported, actors created and a new sequence generated. Fresh verification will run again; fidelity is not guaranteed.</p>'+
          button('Authorize and transfer','authorize-ai-transfer',state.busy):'')+
        (!validEditor()?'<pre>'+esc(workerCommand())+'</pre>'+button('Copy connection command','copy-worker',false,'secondary'):'')+
        button('Back to projects','projects',false,'secondary')+'</section>';

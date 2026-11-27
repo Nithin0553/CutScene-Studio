@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import studio_ai_verifier
+from studio_ai_execution_auth import FRESH_LEVEL, fresh_map_path_available
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -27,13 +28,44 @@ def _same_project(first: str, second: str) -> bool:
     )
 
 
+def preflight_new_level(api, *, expected_project, expected_level, observed_level):
+    """Confirm a fresh map is safe to create, without changing the editor."""
+    if expected_level != FRESH_LEVEL or not observed_level or observed_level == expected_level:
+        raise ValueError("Refusing noncanonical or already loaded automatic level path.")
+    if not fresh_map_path_available({'target_project': expected_project, 'level_path': expected_level}):
+        raise ValueError("Target map or related content already exists on disk.")
+    if api.EditorAssetLibrary.does_asset_exist(expected_level):
+        raise ValueError("Target level already exists; no overwrite.")
+    try:
+        world = api.get_editor_subsystem(api.UnrealEditorSubsystem).get_editor_world()
+        saving = getattr(api, 'EditorLoadingAndSavingUtils', None)
+        dirty_maps = getattr(saving, 'get_dirty_map_packages', None)
+        if callable(dirty_maps):
+            dirty = bool(dirty_maps())
+        else:
+            dirty = bool(world.get_outermost().is_dirty())
+    except Exception as exc:
+        raise RuntimeError("Cannot confirm current Unreal map is saved.") from exc
+    if dirty:
+        raise ValueError("Current Unreal map contains unsaved changes; save it first.")
+    subsystem_type = getattr(api, 'LevelEditorSubsystem', None)
+    editor_level = api.get_editor_subsystem(subsystem_type) if subsystem_type else None
+    creator = getattr(editor_level, 'new_level', None)
+    if not callable(creator):
+        creator = getattr(getattr(api, 'EditorLevelLibrary', None), 'new_level', None)
+    if not callable(creator) or not callable(getattr(api.EditorAssetLibrary, 'make_directory', None)):
+        raise RuntimeError("Unreal level creation API unavailable; save an empty map manually.")
+    return {'current_world_clean': True, 'target_map_absent': True,
+            'level_creation_api_available': True}
+
+
 def inspect_candidate(
     candidate: str | Path, *, expected_project: str, expected_level: str,
-    unreal_api: Any,
+    unreal_api: Any, create_level: bool = False,
 ) -> dict[str, Any]:
-    """Replay evidence, then inspect the already-loaded staging level.
+    """Replay evidence, then inspect an existing or proposed staging level.
 
-    Fresh-map creation and imported asset readback remain separate stages.
+    Actual map creation and imported asset readback remain separate stages.
     Caller must run on the editor thread. No model calls or mutations.
     """
     folder = Path(candidate).resolve()
@@ -65,14 +97,17 @@ def inspect_candidate(
     observed_level = scene._level(api)
     if not _same_project(observed_project, expected_project):
         raise ValueError("Wrong Unreal staging project is loaded.")
-    if observed_level != expected_level:
-        raise ValueError("Open the selected staging level; new-map preflight is not enabled.")
+    if not create_level and observed_level != expected_level:
+        raise ValueError("Open the selected staging level before inspection.")
 
     for name in ("AssetImportTask", "AssetToolsHelpers", "FbxImportUI", "FBXImportType",
                  "EditorActorSubsystem", "EditorAssetLibrary"):
         if not hasattr(api, name):
             raise RuntimeError("Required Unreal setup API unavailable: " + name)
     registry = api.EditorAssetLibrary
+    new_level = (preflight_new_level(api, expected_project=expected_project,
+                                    expected_level=expected_level, observed_level=observed_level)
+                 if create_level else None)
     if not callable(getattr(registry, "does_directory_exist", None)):
         raise RuntimeError("Unreal namespace inspection API unavailable.")
     if registry.does_directory_exist(setup["target_folder"]):
@@ -93,9 +128,11 @@ def inspect_candidate(
         raise ValueError("Duplicate planned actor labels.")
     actors = api.get_editor_subsystem(api.EditorActorSubsystem)
     existing = {str(actor.get_actor_label()) for actor in actors.get_all_level_actors()}
-    for label in labels:
-        if label in existing:
-            raise ValueError("Existing actor label: " + label)
+    # Old-world actors do not carry over; the scene adapter checks the new map again.
+    if not create_level:
+        for label in labels:
+            if label in existing:
+                raise ValueError("Existing actor label: " + label)
     for row in setup["actors"]:
         kind = row["kind"]
         required = None
@@ -115,7 +152,12 @@ def inspect_candidate(
             or scene._project(api) != observed_project
             or scene._level(api) != observed_level):
         raise ValueError("Candidate or destination changed during native inspection.")
+    if create_level:
+        preflight_new_level(api, expected_project=expected_project,
+                            expected_level=expected_level, observed_level=observed_level)
     return {
+        **({'create_level': True, 'expected_level': expected_level,
+            'new_level_preflight': new_level} if create_level else {}),
         "kind": "cutsceneai.studio.ai_native_preflight",
         "status": "AI_NATIVE_SETUP_PREFLIGHT_PASSED",
         "session_id": proof["session_id"],

@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 MAX_AGE = 120
+FRESH_LEVEL = '/Game/CutSceneAI/AutoTransfer/L_Studio_Fresh'
 APPROVAL_FILE = 'ai-execution-authorization.json'
 PROOF_KEYS = (
     'kind', 'status', 'session_id', 'session_sha256', 'automatic_setup_sha256',
@@ -45,6 +46,38 @@ def valid_id(value):
         ch in '0123456789abcdef' for ch in value)
 
 
+def fresh_map_path_available(config):
+    """Read-only check for a canonical, unoccupied destination on disk."""
+    if config['level_path'] != FRESH_LEVEL:
+        return False
+    content = Path(config['target_project']).parent / 'Content'
+    stem = content / 'CutSceneAI' / 'AutoTransfer' / 'L_Studio_Fresh'
+    external = [content / name / 'CutSceneAI' / 'AutoTransfer' / 'L_Studio_Fresh'
+                for name in ('__ExternalActors__', '__ExternalObjects__')]
+    return not any(path.exists() or path.is_symlink() for path in (
+        stem.with_suffix('.umap'), stem.with_suffix('.uasset'), *external))
+
+
+def level_binding_matches(config, request, report):
+    """Match existing-map evidence or an explicit fresh-map request."""
+    if not config.get('auto_create_level'):
+        return (report.get('observed_level') == config['level_path']
+                and report.get('create_level', False) is False
+                and report.get('expected_level', config['level_path']) == config['level_path'])
+    observed = report.get('observed_level')
+    return (fresh_map_path_available(config)
+            and isinstance(observed, str) and bool(observed)
+            and observed != config['level_path']
+            and request.get('create_level') is True
+            and request.get('expected_level') == config['level_path']
+            and request.get('observed_level') == observed
+            and report.get('create_level') is True
+            and report.get('expected_level') == config['level_path']
+            and report.get('new_level_preflight') == {
+                'current_world_clean': True, 'target_map_absent': True,
+                'level_creation_api_available': True})
+
+
 def binding(folder, candidate_id, worker_instance, worker_hash):
     """Recheck the exact records that an explicit inspection authorized."""
     folder = Path(folder)
@@ -59,9 +92,8 @@ def binding(folder, candidate_id, worker_instance, worker_hash):
             or candidate.parent != root
             or candidate != Path(active['candidate_dir']).resolve()
             or active.get('automatic_setup', {}).get('ready') is not True
-            or config.get('source_rights_confirmed') is not True
-            or config.get('auto_create_level')):
-        raise ValueError('AI execution requires the current automatic-setup candidate, rights and existing staging map.')
+            or config.get('source_rights_confirmed') is not True):
+        raise ValueError('AI execution requires the current automatic-setup candidate and source rights.')
     request, request_hash = snapshot(folder / 'ai-native-preflight-request.json')
     response, response_hash = snapshot(folder / 'ai-native-preflight-response.json')
     report, report_hash = snapshot(folder / 'ai-native-preflight.json')
@@ -102,7 +134,7 @@ def binding(folder, candidate_id, worker_instance, worker_hash):
             or target['sequence_asset_path'] != report.get('sequence_path')
             or os.path.normcase(str(target.get('project_path') or '')) != os.path.normcase(config['target_project'])
             or os.path.normcase(str(report.get('observed_project') or '')) != os.path.normcase(config['target_project'])
-            or report.get('observed_level') != config['level_path']):
+            or not level_binding_matches(config, request, report)):
         raise ValueError('Inspected session or destination changed.')
     artifacts = session['artifact_sha256']
     if (set(artifacts) != {'ai-handoff.json', 'coverage-report.json', 'evidence.json', 'transfer-plan.json'}
@@ -156,6 +188,9 @@ def validate(folder, candidate_id, worker_instance, worker_hash, approval_id):
 
 def match_fresh_proof(report, proof):
     """Compare an independent editor inspection with the authorized report."""
+    keys = PROOF_KEYS
+    if report.get('create_level') or proof.get('create_level'):
+        keys += ('create_level', 'expected_level', 'new_level_preflight')
     if any(key not in report or key not in proof or report[key] != proof[key]
-           for key in PROOF_KEYS):
+           for key in keys):
         raise ValueError('Fresh native inspection differs from authorized inspection.')

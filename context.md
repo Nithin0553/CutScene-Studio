@@ -87,7 +87,7 @@ flowchart TD
 
 - Owner reported all checks passed after 7f6a430 (expected 193 Python passes, 21 Node scenarios and Ruff); exact new counts/timings not separately supplied. Last full-suite baseline remains 822 passed/seven external skips. PR #1 open draft.
 - Extended existing AI inspection, authorization, host/worker and UI to support the canonical fresh-map route. Read-only checks bind proposed map and observed world, reject occupied native registry/disk paths including external actor/object directories, require known clean map state and creation API. Worker repeats inspection and checks world/target immediately before existing deterministic level creation; existing scene setup checks the new map before imports. No new architecture or arbitrary level path. Dirty/unverifiable world must be saved or inspected again.
-- Added nine mocked native inspector cases in test_studio_auto_scene.py. New software tests not yet run. Additional host/worker/UI mode regressions to follow in this checkpoint. Keep Unity, Unreal and Ollama closed. Native API behavior and actual map creation remain unverified.
+- Added nine mocked native inspector cases in test_studio_auto_scene.py, five localhost authorization/queue cases and three worker claim cases in test_studio_local_bridge.py, and one Node UI scenario. New software tests not yet run; expected ordered targeted suite 210 passes, Node 22 scenarios. Keep Unity, Unreal and Ollama closed. Native API behavior and actual map creation remain unverified.
 
 ### 2026-11-26 — 157 targeted regressions passed; explicit authorization test coverage
 

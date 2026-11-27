@@ -845,7 +845,7 @@ def test_request_native_preflight_never_submits_execution(service, case):
 
 
 @pytest.fixture
-def ai_execution_fixture(service, monkeypatch):
+def ai_execution_fixture(service, monkeypatch, request):
     """Synthetic persisted evidence; host authorization and worker gate are real."""
     import sys
     from types import SimpleNamespace
@@ -857,7 +857,11 @@ def ai_execution_fixture(service, monkeypatch):
     candidate.mkdir(parents=True)
     fields = fixture_files(tmp)
     fields.update(source_rights_confirmed=True, capture='')
+    new_map = getattr(request, 'param', False)
+    if new_map:
+        fields.update(auto_create_level=True, level_path='/Game/CutSceneAI/AutoTransfer/L_Studio_Fresh')
     cfg = bridge.config_check(fields)
+    observed_level = '/Temp/Untitled' if new_map else cfg['level_path']
     mapping = candidate.with_suffix('.mapping.json')
     mapping.write_bytes(Path(cfg['mapping']).read_bytes())
     analysis = candidate.with_suffix('.source-analysis.json')
@@ -892,7 +896,7 @@ def ai_execution_fixture(service, monkeypatch):
     })
     worker = {
         'heartbeat': datetime.now(UTC).isoformat(), 'project': cfg['target_project'],
-        'level': cfg['level_path'], 'worker': bridge.REQUIRED_WORKER_PROTOCOL,
+        'level': observed_level, 'worker': bridge.REQUIRED_WORKER_PROTOCOL,
         'checkout_root': str(ROOT.resolve()),
         'worker_source_sha256': auth.digest(ROOT / 'integrations/unreal/studio_local_editor_worker.py'),
         'worker_instance_id': 'fixture_instance',
@@ -910,7 +914,7 @@ def ai_execution_fixture(service, monkeypatch):
         'session_id': session['session_id'],
         'session_sha256': auth.digest(candidate / 'session.json'),
         'automatic_setup_sha256': auth.digest(setup), 'artifact_sha256': artifacts,
-        'observed_project': cfg['target_project'], 'observed_level': cfg['level_path'],
+        'observed_project': cfg['target_project'], 'observed_level': observed_level,
         'sequence_path': sequence, 'worker_instance_id': worker['worker_instance_id'],
         'worker_source_sha256': worker['worker_source_sha256'],
         'connection_sha256': auth.digest(work / 'connection.json'),
@@ -920,6 +924,10 @@ def ai_execution_fixture(service, monkeypatch):
         'native_import_readback_pending': True, 'execution_authorized': False,
         'engine_generation_executed': False, 'behavioral_fidelity_established': False,
     }
+    if new_map:
+        report.update(create_level=True, expected_level=cfg['level_path'], new_level_preflight={
+            'current_world_clean': True, 'target_map_absent': True,
+            'level_creation_api_available': True})
     bridge.atomic_json(work / 'ai-native-preflight.json', report)
     bridge.atomic_json(work / 'ai-native-preflight-response.json', {
         'request_id': request_id, 'status': 'AI_NATIVE_PREFLIGHT_COMPLETED',
@@ -944,7 +952,8 @@ def ai_execution_fixture(service, monkeypatch):
 
     monkeypatch.setattr(studio_auto_assets, 'verify', verify_manifest)
     monkeypatch.setattr(bridge, 'destination_readiness',
-                        lambda _: {'status': 'SCENE_SETUP_REQUIRED', 'ready': False})
+                        lambda _: {'status': 'NEW_LEVEL_REQUIRED' if new_map else 'SCENE_SETUP_REQUIRED',
+                                   'ready': False})
     return SimpleNamespace(base=base, work=work, candidate=candidate, cid=candidate_id,
                            cfg=cfg, session=session, report=report, worker=worker,
                            token=token, payload=payload, auth=auth, manifest_calls=manifest_calls)
@@ -1164,3 +1173,84 @@ def test_worker_claim_requires_fresh_native_proof(ai_execution_fixture, monkeypa
     # Calling the gate alone must not run setup or generation.
     assert job['generation_status'] == 'NOT_STARTED'
     assert job['fidelity_verified'] is False
+
+
+@pytest.mark.parametrize('ai_execution_fixture', [True], indirect=True)
+@pytest.mark.parametrize('case', ['valid', 'switched_world', 'map_created', 'bad_report',
+                                  'wrong_request_world'])
+def test_ai_new_map_authorization_is_bound_to_current_world(ai_execution_fixture, case):
+    f = ai_execution_fixture
+    request = bridge.load_json(f.work / 'ai-native-preflight-request.json')
+    assert request['create_level'] is True
+    assert request['observed_level'] == '/Temp/Untitled'
+    assert request['expected_level'] == f.cfg['level_path']
+    approval_id = _approve_fixture(f)
+    if case == 'switched_world':
+        bridge.atomic_json(f.work / 'unreal-worker.json', {**f.worker, 'level': '/Temp/Other'})
+    elif case == 'map_created':
+        path = Path(f.cfg['target_project']).parent / 'Content/CutSceneAI/AutoTransfer/L_Studio_Fresh.umap'
+        path.parent.mkdir(parents=True)
+        path.write_text('existing')
+    elif case == 'bad_report':
+        report = dict(f.report)
+        report['new_level_preflight'] = {'current_world_clean': False}
+        bridge.atomic_json(f.work / 'ai-native-preflight.json', report)
+    elif case == 'wrong_request_world':
+        bridge.atomic_json(f.work / 'ai-native-preflight-request.json',
+                           {**request, 'observed_level': '/Temp/Other'})
+    status, result = _queue_fixture(f, approval_id)
+    if case == 'valid':
+        assert status == 200, result
+        job = bridge.load_json(f.work / 'jobs' / (result['job_id'] + '.json'))
+        assert job['create_level'] is True
+        assert job['expected_level'] == f.cfg['level_path']
+        assert job['automatic_setup'] is True
+        assert job['generation_status'] == 'NOT_STARTED'
+    else:
+        assert status == 422, result
+        assert not (f.work / 'active-job.json').exists()
+        assert not list((f.work / 'jobs').glob('*.json'))
+
+
+@pytest.mark.parametrize('ai_execution_fixture', [True], indirect=True)
+@pytest.mark.parametrize('case', ['valid', 'dirty_after_approval', 'switched_world'])
+def test_new_map_worker_claim_requires_matching_fresh_probe(ai_execution_fixture, monkeypatch, case):
+    import sys
+    from types import SimpleNamespace
+
+    f = ai_execution_fixture
+    approval_id = _approve_fixture(f)
+    status, result = _queue_fixture(f, approval_id)
+    assert status == 200, result
+    job = bridge.load_json(f.work / 'jobs' / (result['job_id'] + '.json'))
+    monkeypatch.setitem(sys.modules, 'unreal', SimpleNamespace())
+    spec = importlib.util.spec_from_file_location(
+        'new_map_worker_test', ROOT / 'integrations/unreal/studio_local_editor_worker.py')
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    worker.WORKSPACE = f.work
+    worker.WORKER_INSTANCE_ID = f.worker['worker_instance_id']
+    import studio_ai_native_preflight as inspector
+
+    def probe(candidate, **kwargs):
+        assert candidate == f.candidate.resolve()
+        assert kwargs['create_level'] is True
+        if case == 'dirty_after_approval':
+            raise ValueError('Current Unreal map contains unsaved changes')
+        return {**f.report, 'observed_level': '/Temp/Other'} if case == 'switched_world' else f.report
+
+    monkeypatch.setattr(inspector, 'inspect_candidate', probe)
+    real_reload = worker.importlib.reload
+    monkeypatch.setattr(worker.importlib, 'reload',
+                        lambda module: module if module is inspector else real_reload(module))
+    claim = f.work / 'jobs' / (f.cid + '.ai-execution.used')
+    if case == 'valid':
+        worker._verify_and_claim_ai_execution(job, f.candidate.resolve())
+        assert claim.exists()
+        assert job['ai_approved_observed_level'] == '/Temp/Untitled'
+        assert job['ai_execution_preflight_verified'] is True
+    else:
+        with pytest.raises(ValueError, match='unsaved changes|Fresh native inspection differs'):
+            worker._verify_and_claim_ai_execution(job, f.candidate.resolve())
+        assert not claim.exists()
+    assert job['generation_status'] == 'NOT_STARTED'

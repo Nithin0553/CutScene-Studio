@@ -8,7 +8,7 @@ const css = fs.readFileSync('apps/studio-web/cinematic.css', 'utf8');
 
 function boot({editorReady = true, censusUnresolved = false, multiSources = false,
   restoredJob = '', restoredPending = false, restoredAI = false, aiFailure = false,
-  missingAI = false, approvalFails = false} = {}) {
+  missingAI = false, approvalFails = false, newMap = false} = {}) {
   const listeners = {}, calls = [], requests = [];
   let html = '', writes = 0, copied = '';
   const app = {
@@ -31,14 +31,14 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
   const censusB = unity + '/CutSceneAI/Exports/feature-surface-unity-B.json';
   const invalidCensus = unity + '/CutSceneAI/Exports/feature-surface-unity-foreign.json';
   let availableCensuses = true;
-  const level = '/Game/CutSceneAI/L_Trial01';
+  const level = newMap?'/Game/CutSceneAI/AutoTransfer/L_Studio_Fresh':'/Game/CutSceneAI/L_Trial01';
   const file = unreal + '/CutSceneAI.uproject';
   const advisory = {status:'PREPARED_ADVISORY',execution_enabled:false,
     decision_counts:{proposed:5,unsupported:2,failed:0,not_analyzed:0},active_ced_alerts:186,
     reason:'Native AI verifier integration is pending; preparation only.'};
   if(restoredJob || restoredPending || restoredAI) {
     connected={unity_project:unity,target_project:file,level_path:level,
-      csir,scene_name:'Benchmark002',source_rights_confirmed:true};
+      csir,scene_name:'Benchmark002',source_rights_confirmed:true,auto_create_level:newMap};
     if(restoredAI){
       candidate={candidate_id:'saved_ai_candidate',action_total:17,ai_analysis:advisory,
         automatic_setup:{available:true,ready:true,blockers:[]}};
@@ -82,9 +82,9 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
         result = {token: 'stubtoken', repo_root: 'B:/Research/CutSceneAI/CutsceneAI', workspace:'C:/Users/Test/.cutscene-studio/runs',
           connection: connected, candidate, active_job: currentJob?.job_id || null,
           one_click_approval: approval,
-          unreal_worker: {connected: editorReady, project: file, level, worker_version: 'studio-editor-v0.5'},
+          unreal_worker: {connected: editorReady, project: file, level:newMap?'/Temp/Untitled':level, worker_version: 'studio-editor-v0.5'},
           destination_readiness: candidate && editorReady ?
-            {status: 'READY', ready:true, candidate_id:candidate.candidate_id} :
+            {status: newMap?'NEW_LEVEL_REQUIRED':'READY', ready:!newMap, candidate_id:candidate.candidate_id} :
             {status: 'WAITING_FOR_UNREAL', ready:false, next_action:'Open Unreal Editor'}};
       } else if (url === '/api/ai-native-preflight') {
         if(opts.method==='POST'){
@@ -93,7 +93,8 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
           result={status:'AI_NATIVE_PREFLIGHT_REQUESTED',verified:false,execution_authorized:false};
         }else result=inspectionRequested?
           {status:'AI_NATIVE_SETUP_PREFLIGHT_PASSED',verified:true,execution_authorized:false,
-           candidate_id:candidate.candidate_id,request_id:'b'.repeat(32),report_sha256:'c'.repeat(64)}:
+           candidate_id:candidate.candidate_id,request_id:'b'.repeat(32),report_sha256:'c'.repeat(64),
+           ...(newMap?{create_level:true,expected_level:level}: {})}:
           {status:'AI_NATIVE_PREFLIGHT_REQUIRED',verified:false,execution_authorized:false};
       } else if (url === '/api/pick-folder') {
         result = {cancelled:false, path:body.kind==='unity'?unity:unreal};
@@ -634,7 +635,24 @@ async function testAIApprovalFailureNeverQueues(){
   assert.ok(!x.calls.includes('/api/execute'));
 }
 
+async function testNewMapRequiresExplicitCreationApproval(){
+  const x=boot({restoredAI:true,newMap:true});
+  await x.pause();
+  await x.pause();
+  await x.click('view-ai-plan');
+  await x.click('inspect-ai-target');
+  await x.poll();
+  assert.match(x.app.innerHTML,/Authorize creation of the new map/);
+  assert.match(x.app.innerHTML,/current world must be clean/);
+  assertNoNativeCalls(x);
+  await x.click('authorize-ai-transfer');
+  await x.poll();
+  assert.equal(x.calls.filter(r=>r==='/api/approve-ai-execution').length,1);
+  assert.equal(x.calls.filter(r=>r==='/api/execute').length,1);
+}
+
 (async()=>{
+  await testNewMapRequiresExplicitCreationApproval();
   await testExplicitAIApprovalQueuesOnlyOnce();
   await testAIApprovalFailureNeverQueues();
   await testExplicitAIInspectionNeverExecutes();
@@ -656,5 +674,5 @@ async function testAIApprovalFailureNeverQueues(){
   await testStrictCensusBlockAndExplicitRecovery();
   await testManualCSIRAndCensus();
   await testMissingSelectedCensusFailsClosed();
-  console.log('Cinematic UI backend contract: 21 scenarios including explicit AI approval, read-only AI inspection, AI preparation-only, failure recovery, native errors and Home-first startup passed.');
+  console.log('Cinematic UI backend contract: 22 scenarios including explicit fresh-map approval, AI approval, read-only AI inspection, AI preparation-only, failure recovery, native errors and Home-first startup passed.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

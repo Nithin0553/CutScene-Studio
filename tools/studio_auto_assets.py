@@ -265,6 +265,22 @@ def inspect(csir_path, mapping_path, plan_path, source_project, source_scope, ta
                                 'placeholder, not proven source lighting parity. Re-export.')
         actors.append(actor_spec)
         if kind == 'entity.prop':
+            if source_identity.is_unity_builtin_cube(entity):
+                # This is an engine-owned resource, never a file import or a
+                # guessed substitute. Native setup must check class and bounds.
+                actor_spec['source_primitive'] = 'unity_builtin_cube'
+                actor_spec['mesh_path'] = source_identity.UNREAL_CUBE_ASSET
+                asset_resolutions.append({
+                    'source': name, 'kind': 'prop_mesh',
+                    'strategy': 'UNITY_BUILTIN_CUBE_NATIVE_TARGET_UNVERIFIED',
+                    'candidates': [source_identity.UNREAL_CUBE_ASSET],
+                })
+                warnings.append(
+                    'Prop '+name+' uses a source-identified built-in Cube; '
+                    'target mesh class, centered 100 cm bounds, materials and '
+                    'collision parity require native verification.'
+                )
+                continue
             evidence = _resolve_model(files, name, entity, root)
             asset_resolutions.append({'source': name, 'kind': 'prop_mesh',
                                       'strategy': evidence['strategy'],

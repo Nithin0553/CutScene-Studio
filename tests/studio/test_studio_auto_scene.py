@@ -406,3 +406,91 @@ def test_unsupported_source_light_type_is_source_asset_blocker(tmp_path):
     )
     assert stage["ready"] is False
     assert any("Unsupported Unity light type" in v for v in stage["blockers"])
+
+
+@pytest.mark.parametrize("variant", ["valid", "missing", "wrong_class", "wrong_bounds"])
+def test_builtin_cube_is_verified_before_any_import_or_spawn(tmp_path, variant):
+    root, files = create(tmp_path)
+    csir = json.loads(files[0].read_text())
+    prop = next(e for e in csir['entities'] if e['ced_type'] == 'entity.prop')
+    prop['metadata'] = {
+        'hierarchy_path': prop['name'],
+        'source_model_assets': [{
+            'asset_path': 'Library/unity default resources',
+            'guid': '0000000000000000e000000000000000',
+            'renderer_path': prop['name'], 'mesh_name': 'Cube',
+        }],
+    }
+    files[0].write_text(json.dumps(csir))
+    stage = studio_auto_assets.inspect(
+        *files, root, 'Assets/Benchmark002', '/Game/CutSceneAI/AutoTransfer/T_CUBE',
+    )
+    path = '/Engine/BasicShapes/Cube.Cube'
+    row = next(r for r in stage['actors'] if r['name'] == prop['name'])
+    assert stage['ready']
+    assert row['source_primitive'] == 'unity_builtin_cube'
+    assert row['mesh_path'] == path
+    assert all(item['target_asset_path'] != path for item in stage['imports'])
+    assert not any('transform-only' in item for item in stage['warnings'])
+    manifest = tmp_path / 'cube-setup.json'
+    manifest.write_text(json.dumps(stage))
+    project = tmp_path / 'Trial.uproject'
+    project.write_text('{}')
+    fake = FakeUnreal(str(project))
+    fake.StaticMeshComponent = object()
+    if variant != 'missing':
+        obj = Asset('SkeletalMesh' if variant == 'wrong_class' else 'StaticMesh', path)
+        obj.get_bounds = lambda: SimpleNamespace(
+            origin=SimpleNamespace(x=0, y=0, z=0),
+            box_extent=SimpleNamespace(x=49 if variant == 'wrong_bounds' else 50, y=50, z=50),
+        )
+        fake.assets[path] = obj
+    spawn = fake.actor_sys.spawn_actor_from_object
+
+    def spawn_with_mesh(obj, loc, rot):
+        actor = spawn(obj, loc, rot)
+        actor.get_component_by_class = lambda _: SimpleNamespace(
+            get_editor_property=lambda _: obj,
+        )
+        return actor
+
+    fake.actor_sys.spawn_actor_from_object = spawn_with_mesh
+    receipt_file = tmp_path / 'receipt.json'
+
+    def run():
+        return scene.run(
+            str(manifest), str(receipt_file), csir_path=str(files[0]),
+            mapping_path=str(files[1]), plan_path=str(files[2]),
+            expected_project=str(project), expected_level='/Game/Tests/L_Test',
+            unreal_api=fake,
+        )
+
+    if variant == 'valid':
+        receipt = run()
+        assert receipt['status'] == 'SETUP_SAVED_UNVERIFIED'
+        assert len(receipt['actors_created']) == 5
+        assert all(item['path'] != path for item in receipt['assets_imported'])
+        assert fake.assets[path] is obj
+        assert not receipt['fidelity_verified']
+    else:
+        before = dict(fake.assets)
+        with pytest.raises(scene.AutomaticSetupError, match='Cube'):
+            run()
+        assert fake.assets == before
+        assert not fake.actor_sys.actors
+        assert not json.loads(receipt_file.read_text())['changes_possible']
+
+
+@pytest.mark.parametrize("change", ["guid", "mesh_name", "renderer_path"])
+def test_builtin_cube_identity_does_not_guess_from_names(change):
+    record = {
+        'asset_path': 'Library/unity default resources',
+        'guid': '0000000000000000e000000000000000',
+        'renderer_path': 'CubeObject', 'mesh_name': 'Cube',
+    }
+    entity = {'name': 'CubeObject', 'ced_type': 'entity.prop', 'metadata': {
+        'hierarchy_path': 'CubeObject', 'source_model_assets': [record],
+    }}
+    assert studio_auto_assets.source_identity.is_unity_builtin_cube(entity)
+    record[change] = 'unverified'
+    assert not studio_auto_assets.source_identity.is_unity_builtin_cube(entity)

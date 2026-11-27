@@ -1,7 +1,9 @@
 """End-to-end localhost API boundary tests, no Unity or Unreal runtime required."""
+import hashlib
 import importlib.util
 import json
 import threading
+from datetime import UTC, datetime, timedelta
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
@@ -671,3 +673,98 @@ def test_invalid_ai_toggle_and_non_object_request_return_422(service):
     assert status == 422
     assert 'Expected JSON request object' in result['error']
     assert not (tmp / 'work/active-candidate.json').exists()
+
+
+@pytest.mark.parametrize('case', [
+    'valid', 'expired', 'restart', 'wrong_level', 'changed_connection',
+    'changed_candidate', 'changed_session', 'changed_setup', 'changed_artifact',
+    'changed_source', 'authorization_flag', 'missing_report',
+])
+def test_ai_native_preflight_report_is_read_only_and_candidate_bound(service, case):
+    base, tmp = service
+    work = tmp / 'work'
+    candidate_id = 'candidate_fixture'
+    candidate = work / 'candidates' / candidate_id
+    candidate.mkdir(parents=True)
+    cfg = fixture_files(tmp)
+    cfg['source_rights_confirmed'] = True
+    cfg['capture'] = ''
+    mapping = candidate.with_suffix('.mapping.json')
+    mapping.write_bytes(Path(cfg['mapping']).read_bytes())
+    analysis = candidate.with_suffix('.source-analysis.json')
+    analysis.write_text('{}', encoding='utf-8')
+    sequence = '/Game/Trials/LS_Fresh'
+
+    def sha(path):
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    artifacts = {}
+    for name in ('ai-handoff.json', 'coverage-report.json', 'evidence.json',
+                 'transfer-plan.json'):
+        path = candidate / name
+        path.write_text('{}', encoding='utf-8')
+        artifacts[name] = sha(path)
+    setup = candidate / 'automatic-setup.json'
+    setup.write_text('{}', encoding='utf-8')
+    session_path = candidate / 'session.json'
+    bridge.atomic_json(session_path, {
+        'session_id': 'session_fixture',
+        'source': {'csir_path': cfg['csir'], 'sha256': sha(Path(cfg['csir']))},
+        'target': {'mapping_path': str(mapping), 'mapping_sha256': sha(mapping),
+                   'project_path': cfg['target_project'], 'sequence_asset_path': sequence},
+        'source_capture': None,
+        'ai_analysis': {'path': str(analysis), 'sha256': sha(analysis)},
+        'artifact_sha256': artifacts,
+    })
+    active = work / 'active-candidate.json'
+    config = work / 'connection.json'
+    bridge.atomic_json(active, {
+        'candidate_id': candidate_id, 'candidate_dir': str(candidate),
+        'mapping_copy': str(mapping), 'sequence_path': sequence,
+        'ai_analysis': {'status': 'PREPARED_ADVISORY'},
+    })
+    bridge.atomic_json(config, cfg)
+    now = datetime.now(UTC)
+    worker_sha = sha(ROOT / 'integrations/unreal/studio_local_editor_worker.py')
+    bridge.atomic_json(work / 'unreal-worker.json', {
+        'heartbeat': now.isoformat(), 'project': cfg['target_project'],
+        'level': '/Game/Other' if case == 'wrong_level' else cfg['level_path'],
+        'worker': bridge.REQUIRED_WORKER_PROTOCOL,
+        'checkout_root': str(ROOT.resolve()), 'worker_source_sha256': worker_sha,
+        'worker_instance_id': 'new_worker' if case == 'restart' else 'worker_fixture',
+    })
+    report_path = work / 'ai-native-preflight.json'
+    report = {
+        'kind': 'cutsceneai.studio.ai_native_preflight',
+        'status': 'AI_NATIVE_SETUP_PREFLIGHT_PASSED',
+        'candidate_id': candidate_id, 'session_id': 'session_fixture',
+        'session_sha256': sha(session_path), 'automatic_setup_sha256': sha(setup),
+        'artifact_sha256': artifacts,
+        'observed_project': cfg['target_project'], 'observed_level': cfg['level_path'],
+        'sequence_path': sequence, 'worker_instance_id': 'worker_fixture',
+        'worker_source_sha256': worker_sha, 'connection_sha256': sha(config),
+        'candidate_record_sha256': sha(active),
+        'checked_at': (now - timedelta(seconds=121) if case == 'expired' else now).isoformat(),
+        'execution_authorized': case == 'authorization_flag',
+        'engine_generation_executed': False, 'behavioral_fidelity_established': False,
+    }
+    if case != 'missing_report':
+        bridge.atomic_json(report_path, report)
+    changed = {
+        'changed_connection': config, 'changed_candidate': active,
+        'changed_session': session_path, 'changed_setup': setup,
+        'changed_artifact': candidate / 'transfer-plan.json',
+        'changed_source': Path(cfg['csir']),
+    }.get(case)
+    if changed:
+        changed.write_bytes(changed.read_bytes() + b'\n')
+    status, result = call(base + '/api/ai-native-preflight')
+    assert status == 200
+    assert result['execution_authorized'] is False
+    assert result['verified'] is (case == 'valid')
+    assert result['status'] == (
+        'AI_NATIVE_SETUP_PREFLIGHT_PASSED' if case == 'valid'
+        else 'AI_NATIVE_PREFLIGHT_REQUIRED'
+    )
+    assert not (work / 'active-job.json').exists()
+    assert not (work / 'one-click-approval.json').exists()

@@ -8,7 +8,7 @@
   const norm = v => String(v || '').replaceAll('\\','/').toLowerCase();
   const state = {screen:'home', phase:'IDLE', busy:false, info:'', error:'', status:null,
     discovery:null, folders:{unity:'',unreal:''}, unrealProject:'', csir:'', level:'',
-    sourceRights:false, allowPartial:false, candidate:null, job:null, verification:null,
+    sourceRights:false, allowPartial:false, enableAI:false, candidate:null, job:null, verification:null,
     diagnosis:null, feedback:null, running:false, detailsOpen:false, menuOpen:false,
     censusOptions:[], censusPath:'', censusSelection:null, censusIssue:false, editorHelpOpen:false};
   const pathRoot = () => String(state.status?.repo_root||'').replaceAll('\\','/');
@@ -20,6 +20,7 @@
   const connection = () => state.status?.connection;
   const worker = () => state.status?.unreal_worker || {};
   const readiness = () => state.status?.destination_readiness || {};
+  const aiCandidate = () => Boolean(state.candidate?.ai_analysis);
   const terminal = job => job && !['RUNNING','QUEUED'].includes(job.status);
   const generated = () => Boolean(state.job &&
     state.job.generation_status === 'GENERATED_UNVERIFIED' &&
@@ -42,11 +43,12 @@
       ['READY','SCENE_SETUP_REQUIRED','ASSETS_REQUIRED','NEW_LEVEL_REQUIRED'].includes(d.status));
   }
   function canExecute(){
-    const d=readiness();return Boolean(validEditor()&&state.candidate&&!state.job&&
+    const d=readiness();return Boolean(validEditor()&&state.candidate&&!state.job&&!aiCandidate()&&
       ((d.ready&&d.candidate_id===state.candidate.candidate_id)||canAutoSetup()));
   }
   function progress(){
-    const selected=state.screen==='results'?3:state.screen==='transfer'?2:state.candidate?1:0;
+    const planning=['PREPARING','ANALYZING_AI','AI_PREPARED'].includes(state.phase);
+    const selected=state.screen==='results'?3:state.screen==='transfer'?(planning?1:2):state.candidate?1:0;
     return '<div class="steps" aria-label="Transfer workflow">'+
       ['Connect','Plan','Import','Results'].map((label,i)=>
         '<div class="step '+(i===selected?'active':i<selected?'done':'')+
@@ -75,7 +77,8 @@
       button('Start Transfer','projects')+
       (state.job?(terminal(state.job)?
         '<div class="landing-previous">'+button('View Previous Transfer Report','results',false,'secondary')+'</div>':
-        '<div class="landing-previous">'+button('View Active Transfer','resume-transfer',false,'secondary')+'</div>'):'')+
+        '<div class="landing-previous">'+button('View Active Transfer','resume-transfer',false,'secondary')+'</div>'):
+        aiCandidate()?'<div class="landing-previous">'+button('View AI Plan','view-ai-plan',false,'secondary')+'</div>':'')+
       '</div></section>';
   }
   function card(kind,folder,ready){
@@ -119,7 +122,7 @@
     const activeJob=Boolean(state.job&&!terminal(state.job));
     // An approved candidate without a queued Unreal job is NOT an active
     // engine transfer. It must never leave Start Transfer silently disabled.
-    const pendingCandidate=Boolean(connected&&state.running&&state.candidate&&!state.job);
+    const pendingCandidate=Boolean(connected&&(state.running||aiCandidate())&&state.candidate&&!state.job);
     const matchingCensuses=state.censusOptions.filter(x=>x.project_identity_proven &&
       x.source_scope_matched && x.state!=='INVALID');
     let choices='';
@@ -154,9 +157,9 @@
       button('Reconnect '+ico('link'),'connect',
         state.busy||!state.sourceRights||!d.ready||!csir||!level):
       pendingCandidate?
-      button('Start New Transfer '+ico('arrow'),'start-fresh',
+      button((state.enableAI?'Prepare New AI Plan ':'Start New Transfer ')+ico('arrow'),'start-fresh',
         state.busy||!state.sourceRights||!state.censusSelection):
-      connected?button('Start Transfer '+ico('arrow'),'start',
+      connected?button((state.enableAI?'Prepare AI Plan ':'Start Transfer ')+ico('arrow'),'start',
         state.busy||!state.sourceRights||!state.censusSelection):
       button('Connect Projects '+ico('link'),'connect',state.busy||!d.ready||!csir||!level||!state.sourceRights);
     return progress()+'<main class="projects-view"><h1>'+(!chosenU?'Select Unity Project':!chosenR?'Select Unreal Project':'Connect Unity &amp; Unreal')+'</h1>'+
@@ -167,9 +170,13 @@
       (state.sourceRights?'checked':'')+' /> I have permission to copy source assets</label>'+
       '<label><input type="checkbox" name="allow-partial" '+(state.allowPartial?'checked':'')+
       ' /> Allow partial transfer (not verified)</label>'+
+      '<label><input type="checkbox" name="enable-ai-agent" '+(state.enableAI?'checked ':'')+
+      (state.busy||activeJob?'disabled':'')+' /> Enable AI Agent (local Ollama)</label>'+
+      (state.enableAI?'<p class="subnote">Analyze the selected source and prepare a verified plan. Native AI transfer is not enabled yet.</p>':'')+
       '</div>':'')+
       (Object.values(d.errors||{})).map(v=>'<p class="warning">'+esc(v)+'</p>').join('')+
       '<div class="center-actions">'+(chosenU?action:'')+'</div></form>'+
+      (aiCandidate()&&!state.job?'<div class="center-actions">'+button('View AI Plan','view-ai-plan',state.busy,'secondary')+'</div>':'')+
       (activeJob?'<p class="subnote">An Unreal job is already queued or running.</p>':
        pendingCandidate?'<p class="subnote">A previous candidate was prepared but no Unreal job was submitted.</p>':
        connected?'<p class="subnote">Ready to transfer.</p>':'')+
@@ -198,10 +205,24 @@
       '<p class="subnote">Generation does not prove fidelity.</p>'+
       '<a href="?advanced=1" class="report-link">Advanced details</a></details>';
   }
+  function aiPlanSummary(){
+    const a=state.candidate.ai_analysis,c=a.decision_counts||{};
+    return '<section class="research" aria-label="AI preparation report">'+
+      '<h3>Source analysis and verified candidate</h3>'+
+      resultRow('Proposed mappings',c.proposed??'Not reported')+
+      resultRow('Withheld mappings',c.unsupported??'Not reported')+
+      resultRow('Failed / not analyzed',(c.failed??'?')+' / '+(c.not_analyzed??'?'))+
+      resultRow('Planned actions',state.candidate.action_total??'Not reported')+
+      resultRow('Active source CED alerts',a.active_ced_alerts??'Not reported')+
+      '<p class="subnote">'+esc(a.reason||'Native execution is not enabled.')+' No native changes performed. Fidelity remains unverified.</p>'+
+      button('Back to projects','projects',false,'secondary')+'</section>';
+  }
   function transfer(){
     const phase=state.phase,d=readiness(),j=state.job||{};
-    const activelyWorking=phase==='PREPARING'||phase==='READY_TO_QUEUE'||['RUNNING','QUEUED'].includes(j.status);
+    const activelyWorking=['PREPARING','ANALYZING_AI','READY_TO_QUEUE'].includes(phase)||['RUNNING','QUEUED'].includes(j.status);
     const label=phase==='PREPARING'?'Preparing…':
+      phase==='ANALYZING_AI'?'Analyzing source with local AI…':
+      phase==='AI_PREPARED'?'AI plan prepared':
       phase==='WAITING_FOR_EDITOR'?'Connect Unreal':
       phase==='READY_TO_QUEUE'?'Checking target…':
       ['RUNNING','QUEUED'].includes(j.status)?'Transferring…':
@@ -214,6 +235,7 @@
       (state.censusSelection?.source_snapshot_partial_count?
         '<p class="subnote">'+esc(state.censusSelection.source_snapshot_partial_count)+
         ' native source snapshots recorded; collision, URP and signal behavior remains Unreal-unverified. See Detailed report.</p>':'')+
+      (phase==='AI_PREPARED'&&aiCandidate()?aiPlanSummary():'')+
       (phase==='WAITING_FOR_EDITOR'?'<div class="editor-instructions"><p>Open the target project. Paste this into the Unreal Python Console.</p>'+
         '<pre id="worker-command">'+esc(command)+'</pre>'+button('Copy connection command','copy-worker',false,'secondary')+
         '<p class="subnote">'+esc(worker().connected?('Open project: '+short(worker().project)+' · Level: '+(worker().level||'Unknown')+' · Selected level: '+(connection()?.level_path||'Unknown')):(d.next_action||'Waiting for the editor'))+'</p></div>':'')+
@@ -227,7 +249,7 @@
           '</span><small>'+esc(f.state||'UNRESOLVED')+'</small></div>').join('')+'</div>'+
         (state.censusSelection.findings_truncated?'<p class="subnote">Additional source findings are available in the advanced report.</p>':'')+
         '<p class="subnote">Partial transfer excludes unverified features.</p>'+
-        button('Transfer supported parts','best-effort',state.busy,'secondary')+
+        button(state.enableAI?'Prepare supported parts':'Transfer supported parts','best-effort',state.busy,'secondary')+
         '</section>':'')+
       '<div class="transfer-progress"><div class="indeterminate '+(activelyWorking?'working':'')+
       '" role="progressbar" aria-label="Transfer state" aria-valuetext="'+esc(label)+'"><i></i></div>'+
@@ -404,7 +426,8 @@
   }
   async function prepare(){
     state.phase='PREPARING';render();
-    const opts={enable_fbx_embedded_material_import:true,enable_actor_visibility_fallback:false};
+    const opts={enable_fbx_embedded_material_import:true,enable_actor_visibility_fallback:false,
+      enable_ai_agent:state.enableAI};
     const chosen=state.censusPath;
     if(!chosen)throw Error('Choose a Source Census for this transfer before continuing.');
     // Revalidate the exact explicit choice. Do not switch to another census.
@@ -422,14 +445,19 @@
         ' source component/scope findings. Review the exact findings below before choosing how to continue. No Unreal assets were modified.');
     }
     state.censusIssue=false;
+    if(opts.enable_ai_agent){state.phase='ANALYZING_AI';render();}
     state.candidate=await api('prepare',opts);
+    if(opts.enable_ai_agent&&!aiCandidate())throw Error('AI evidence missing from prepared candidate. No execution requested.');
+    if(aiCandidate()){
+      state.phase='AI_PREPARED';state.running=false;state.error='';state.info='';render();return;
+    }
     // An existing, independently ready Unreal level may not require imports.
     // Never treat an import blocker as permission to bypass editor readiness.
     state.phase='READY_TO_QUEUE';
     await api('approve-one-click',{candidate_id:state.candidate.candidate_id});
   }
   async function advance(){
-    if(!state.running||state.busy||state.job||!state.candidate)return;
+    if(!state.running||state.busy||state.job||!state.candidate||aiCandidate())return;
     if(!validEditor()){state.phase='WAITING_FOR_EDITOR';render();return;}
     const d=readiness();
     if(!d.ready && state.candidate.automatic_setup?.blockers?.length){
@@ -453,7 +481,7 @@
     // User explicitly requested a new candidate instead of reusing the
     // restored approval. The backend refuses reconnect if an Unreal job
     // was queued while this screen was open.
-    if(!connection()||state.job||!state.running||!state.candidate)
+    if(!connection()||state.job||(!state.running&&!aiCandidate())||!state.candidate)
       throw Error('There is no unsubmitted candidate to replace. Inspect the active job or reconnect.');
     const chosenCSIR=state.csir,chosenLevel=state.level,chosenCensus=state.censusPath;
     if(!chosenCensus||!state.censusSelection)
@@ -478,6 +506,7 @@
     if(state.running||state.job)throw Error('A candidate is already active; inspect it before creating another.');
     state.screen='transfer';state.running=true;
     await prepare();await refresh();
+    if(aiCandidate()){state.phase='AI_PREPARED';state.running=false;render();return;}
     state.phase='WAITING_FOR_EDITOR';render();await advance();
   }
   async function restore(){
@@ -496,7 +525,8 @@
         state.running=Boolean(state.job||(approval?.candidate_id&&
           approval.candidate_id===state.candidate?.candidate_id&&
           approval.source_csir===connection().csir));
-        if(!terminal(state.job)&&state.job)state.phase='RUNNING';
+        if(aiCandidate()&&!state.job){state.enableAI=true;state.running=false;state.phase='AI_PREPARED';}
+        else if(!terminal(state.job)&&state.job)state.phase='RUNNING';
         else if(state.running&&!state.job){state.phase='WAITING_FOR_EDITOR';}
         try{await scan();}catch{}
       }
@@ -535,6 +565,10 @@
       finally{state.busy=false;render();}
       return;
     }
+    if(name==='view-ai-plan'){
+      if(aiCandidate()&&!state.job){state.screen='transfer';state.phase='AI_PREPARED';state.running=false;render();}
+      return;
+    }
     if(name==='resume-transfer'){
       if((state.job&&!terminal(state.job))||
          (state.running&&state.candidate&&!state.job)){
@@ -554,8 +588,8 @@
       try{
         await prepare();
         await refresh();
-        state.phase='WAITING_FOR_EDITOR';
-        await advance();
+        if(aiCandidate()){state.phase='AI_PREPARED';state.running=false;}
+        else{state.phase='WAITING_FOR_EDITOR';await advance();}
       }catch(e){state.error=e.message;state.phase='BLOCKED';state.running=false;}
       finally{state.busy=false;render();}
       return;
@@ -623,6 +657,7 @@
     const n=e.target?.name,v=e.target?.value;
     if(n==='source-rights'){state.sourceRights=e.target.checked;render();return;}
     if(n==='allow-partial'){state.allowPartial=e.target.checked;render();return;}
+    if(n==='enable-ai-agent'){if(!state.busy)state.enableAI=e.target.checked;render();return;}
     if(n==='csir'){
       state.csir=v;state.censusOptions=[];state.censusPath='';state.censusSelection=null;
       render();return;

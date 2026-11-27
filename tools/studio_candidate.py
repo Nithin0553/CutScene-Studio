@@ -35,6 +35,7 @@ def prepare_candidate(
     hierarchy_transfer: bool = False,
     transfer_options: dict[str, Any] | None = None,
     analysis_path: Path | None = None,
+    target_project: Path | None = None,
 ) -> tuple[Path, dict]:
     """Write fresh mapping next to new output and source-verified prepared artifacts."""
     mapping_file = output_folder.with_suffix(".mapping.json")
@@ -81,7 +82,7 @@ def prepare_candidate(
     options = {"analysis_path": analysis_path} if analysis_path is not None else {}
     session = prepared_transfer.prepare(
         csir_path, mapping_file, output_folder,
-        capture_path=capture_path, **options,
+        capture_path=capture_path, target_project=target_project, **options,
     )
     return mapping_file, session
 

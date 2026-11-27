@@ -15,6 +15,47 @@ GUID = re.compile(r"^[0-9a-fA-F]{32}$")
 UNITY_ID = re.compile(r"^unity-asset:([0-9a-fA-F]{32}):[-+]?\d+$")
 
 
+# Unity's exported default-resource identity, not a name-based asset guess.
+UNITY_CUBE_RESOURCE = "Library/unity default resources"
+UNITY_CUBE_GUID = "0000000000000000e000000000000000"
+UNREAL_CUBE_ASSET = "/Engine/BasicShapes/Cube.Cube"
+
+
+def direct_renderer_model(entity: Mapping) -> Mapping | None:
+    """Accept one directly owned renderer mesh, not an aggregate child record."""
+    metadata = entity.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return None
+    path = metadata.get("hierarchy_path")
+    records = metadata.get("source_model_assets")
+    if not isinstance(path, str) or not path or not isinstance(records, list):
+        return None
+    if len(records) != 1 or not isinstance(records[0], Mapping):
+        return None
+    record = records[0]
+    if record.get("renderer_path") != path or not record.get("mesh_name"):
+        return None
+    materials = metadata.get("source_material_assets", [])
+    if not isinstance(materials, list) or any(
+        not isinstance(row, Mapping) or row.get("renderer_path") != path
+        for row in materials
+    ):
+        return None
+    return record
+
+
+def is_unity_builtin_cube(entity: Mapping) -> bool:
+    """Recognize only the captured Unity built-in Cube resource and owner."""
+    record = direct_renderer_model(entity)
+    return bool(
+        entity.get("ced_type") == "entity.prop"
+        and record is not None
+        and record.get("asset_path") == UNITY_CUBE_RESOURCE
+        and record.get("guid") == UNITY_CUBE_GUID
+        and record.get("mesh_name") == "Cube"
+    )
+
+
 def _tokens(text: str) -> str:
     words = [x.lower() for x in re.findall(r"[A-Za-z0-9]+", str(text))]
     words = [x for x in words if x not in {'a', 'b', 'rootmotion', 'animation', 'clip'}]

@@ -7,11 +7,23 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
+# Direct imports must select the implementation, not tools/transfer_backend.py.
+_STUDIO_PATH = str(Path(__file__).resolve().parent)
+while _STUDIO_PATH in sys.path:
+    sys.path.remove(_STUDIO_PATH)
+sys.path.insert(0, _STUDIO_PATH)
+
 import asset_staging
 import transfer_backend
+
+if Path(str(getattr(transfer_backend, "__file__", ""))).resolve() != (
+    Path(_STUDIO_PATH) / "transfer_backend.py"
+).resolve():
+    raise ImportError("Shadowed transfer_backend module; restart with the canonical Studio checkout.")
 
 VERSION = "0.1.0"
 

@@ -33,6 +33,8 @@ class Task:
 class Actor:
     def __init__(self,label=''):
         self.label=label
+    def get_components_by_class(self,cls):
+        return [SimpleNamespace(get_skeletal_mesh_asset=lambda:self.mesh)] if hasattr(self,'mesh') else []
     def get_actor_label(self): return self.label
     def set_actor_label(self,label,mark_dirty=False): self.label=label
 
@@ -41,7 +43,7 @@ class Actors:
     def __init__(self): self.actors=[]
     def get_all_level_actors(self): return self.actors
     def spawn_actor_from_object(self,obj,loc,rot):
-        x=Actor();self.actors.append(x);return x
+        x=Actor();x.mesh=obj;self.actors.append(x);return x
     def spawn_actor_from_class(self,cls,loc,rot):
         x=Actor();x.native_class=cls;self.actors.append(x);return x
 
@@ -60,6 +62,7 @@ class FakeUnreal:
         self.AssetImportTask=Task
         self.FbxImportUI=Task
         self.FBXImportType=SimpleNamespace(FBXIT_ANIMATION=1,FBXIT_SKELETAL_MESH=2,FBXIT_STATIC_MESH=3)
+        self.SkeletalMeshComponent=object()
         self.CineCameraActor=object()
         self.PointLight=type('PointLight', (), {})
         self.SpotLight=type('SpotLight', (), {})
@@ -102,6 +105,7 @@ def test_auto_setup_imports_and_spawns_without_prior_unreal_actors(tmp_path):
     assert receipt['status']=='SETUP_SAVED_UNVERIFIED'
     assert receipt['level_saved']
     assert len(receipt['actors_created'])==5
+    assert len(receipt['rig_identity_setup'])==2
     assert len(receipt['assets_imported'])==6
     assert len(unreal.actor_sys.actors)==5
     assert receipt['fidelity_verified'] is False
@@ -700,3 +704,32 @@ def test_source_static_light_setup_is_manifest_bound_and_native_checked(tmp_path
         assert result["light_property_setup"][0]["status"] == "PASS"
         assert result["light_property_setup"][0]["observed"] == spec["light_setup"]
         assert result["fidelity_verified"] is False
+
+
+def test_spawned_wrong_mesh_stops_before_level_save(tmp_path):
+    root, files = create(tmp_path)
+    stage = studio_auto_assets.inspect(
+        *files, root, "Assets/Benchmark002", "/Game/CutSceneAI/AutoTransfer/T_RIG")
+    manifest = tmp_path / "setup.json"
+    manifest.write_text(json.dumps(stage))
+    project = tmp_path / "Target.uproject"
+    project.write_text("{}")
+    api = FakeUnreal(str(project))
+    original = api.actor_sys.spawn_actor_from_object
+
+    def wrong_mesh(obj, loc, rot):
+        actor = original(obj, loc, rot)
+        actor.mesh = Asset("SkeletalMesh", "/Game/Wrong.Wrong")
+        actor.mesh.skeleton = obj.skeleton
+        return actor
+
+    api.actor_sys.spawn_actor_from_object = wrong_mesh
+    output = tmp_path / "receipt.json"
+    with pytest.raises(ValueError, match="wrong skeletal mesh"):
+        scene.run(str(manifest), str(output), csir_path=str(files[0]),
+                  mapping_path=str(files[1]), plan_path=str(files[2]),
+                  expected_project=str(project), expected_level="/Game/Tests/L_Test", unreal_api=api)
+    receipt = json.loads(output.read_text())
+    assert receipt["status"] == "PARTIAL_SETUP_MUST_INSPECT"
+    assert receipt["failed_step"]["phase"] == "rig_identity_setup"
+    assert not receipt["level_saved"]

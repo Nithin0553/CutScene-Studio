@@ -189,6 +189,9 @@ def _preflight(plan: dict[str, Any]) -> None:
         kind = str(action["kind"])
         if kind == "skeletal_animation":
             animation = _load_asset(str(action["unreal_asset_path"]))
+            import rig_identity
+
+            rig_identity.verify_animation(actor_cache[action["entity_name"]], animation, unreal)
             expected = action.get("expected_root_delta_cm")
             if expected is not None:
                 try:

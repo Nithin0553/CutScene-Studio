@@ -185,6 +185,7 @@ def audit(job_path: str | Path, report_path: str | Path, *, unreal_api: Any = No
         by_label.setdefault(str(actor.get_actor_label()), []).append(actor)
     actor_rows = []
     light_rows = []
+    rig_rows = []
     for item in manifest.get("actors", []):
         label = str(item["label"])
         matches = by_label.get(label, [])
@@ -210,6 +211,26 @@ def audit(job_path: str | Path, report_path: str | Path, *, unreal_api: Any = No
                 measurement = studio_light_properties.observe(matches[0], fields, api)
                 light_rows.append(dict(measurement, actor=label,
                                        excluded_animated_fields=sorted(set(item["light_setup"]) - set(fields))))
+        if class_ok and kind == "entity.character":
+            mesh_rows = [row for row in manifest["imports"]
+                         if row.get("character") == item["name"] and row["kind"] == "SkeletalMesh"]
+            animation_rows = [row for row in manifest["imports"]
+                              if row.get("character") == item["name"] and row["kind"] == "AnimSequence"]
+            # Legacy manifests without character-scoped imports remain comparable;
+            # never claim their rig correspondence was measured.
+            if mesh_rows or animation_rows:
+                adapter_dir = str(Path(__file__).resolve().parent)
+                if adapter_dir not in sys.path:
+                    sys.path.insert(0, adapter_dir)
+                import rig_identity
+
+                if len(mesh_rows) != 1:
+                    measurement = {"status": "FAIL", "reason": "Nonunique source-bound mesh import"}
+                else:
+                    mesh = api.load_asset(mesh_rows[0]["target_asset_path"])
+                    animations = [api.load_asset(row["target_asset_path"]) for row in animation_rows]
+                    measurement = rig_identity.observe(matches[0], mesh, animations, api)
+                rig_rows.append(dict(measurement, actor=label))
         parent = None
         if len(matches) == 1:
             getter = getattr(matches[0], "get_attach_parent_actor", None)
@@ -239,8 +260,8 @@ def audit(job_path: str | Path, report_path: str | Path, *, unreal_api: Any = No
     enumerable = sequence_rows["binding_count"] is not None and sequence_rows["root_track_count"] is not None
     native_status = (
         "FAIL" if not (level_disk and sequence_ok and all_assets and all_actors)
-        or any(row["status"] == "FAIL" for row in light_rows)
-        else "INCOMPLETE" if not enumerable or any(row["status"] == "INCOMPLETE" for row in light_rows)
+        or any(row["status"] == "FAIL" for row in light_rows + rig_rows)
+        else "INCOMPLETE" if not enumerable or any(row["status"] == "INCOMPLETE" for row in light_rows + rig_rows)
         else "PASS"
     )
     # Native persistence and historical source provenance are separate claims:
@@ -277,6 +298,10 @@ def audit(job_path: str | Path, report_path: str | Path, *, unreal_api: Any = No
         "LIGHT_PROPERTY_READBACK_" + row["status"] + ": " + row["actor"]
         for row in light_rows if row["status"] != "PASS"
     )
+    native_issues.extend(
+        "RIG_IDENTITY_READBACK_" + row["status"] + ": " + row["actor"]
+        for row in rig_rows if row["status"] != "PASS"
+    )
     if not level_disk:
         native_issues.append("SAVED_LEVEL_PACKAGE_MISSING")
     if not sequence_ok:
@@ -296,6 +321,7 @@ def audit(job_path: str | Path, report_path: str | Path, *, unreal_api: Any = No
         "expected_level": expected_level, "observed_level": observed_level,
         "level_file_exists": level_disk, "sequence": sequence_rows,
         "assets": rows, "actors": actor_rows, "static_light_properties": light_rows,
+        "rig_identities": rig_rows,
         "asset_count": len(rows), "assets_class_and_disk_verified": len(found),
         "actor_count": len(actor_rows),
         "actors_unique_and_class_verified": actors_verified,

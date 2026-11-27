@@ -83,6 +83,13 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-27 — Static lighting regression passed; exact skeletal rig identity
+
+- Owner confirmed all checks passed at 6111bc4 (static-light Ruff and six-module regression; exact count not supplied). Prior confirmed 224 conversion cases and 252 host/provider cases, Node 23. PR #1 open draft.
+- Added read-only native rig_identity adapter: require exactly one destination SkeletalMeshComponent and actual SkeletalMesh/AnimSequence/Skeleton identities. Prefer documented native mesh accessors; compare full native object paths. Automatic setup verifies newly spawned actor actually uses the imported source-bound mesh, records identity in setup receipt, and preserves partial-mutation failure behavior. Deterministic builder verifies actor/animation exact skeleton identity before generation and root sampling, not merely importer success. Different skeletons require explicit retargeting, no automatic compatibility assumptions. Canonical helper reload included.
+- Independent persistence audit checks character-scoped imported mesh and animation identities against actual saved actor mesh; wrong measured identity FAIL, unavailable evidence INCOMPLETE. Legacy manifests without scoped imports retain existing structural comparison without new rig claims. Exact skeleton identity is not bone hierarchy, rest-pose, skinning, retargeting or motion fidelity proof.
+- Added 12 cases (8 helper, one setup failure, three persistence), augmented setup success assertion. New tests not run remotely. Run affected native-helper, setup, persistence, planner-sync and builder contract regressions, plus Ruff on new helper and persistence audit. No UI changes; keep engines/Ollama closed. Next: animation timing/rig evidence and material/environment adaptation, then bounded CineTwin repair. Native acceptance pending.
+
 ### 2026-11-27 — Persistence audit import formatting
 
 - Owner reported one remaining I001 diagnostic at 3b03462: extra blank line between imports and LOGGER. Removed exactly that blank line; diagnostic logging and behavior unchanged. No Python regression output supplied for static lighting yet.

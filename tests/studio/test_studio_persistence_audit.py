@@ -402,3 +402,33 @@ def test_static_light_properties_are_observed_after_reopen(tmp_path, case, statu
         assert row["excluded_animated_fields"] == ["intensity"]
         assert row["expected"] == {"attenuation_radius": 500.0}
     assert result["fidelity_verified"] is False
+
+
+@pytest.mark.parametrize("case,status", [
+    ("valid", "STRUCTURAL_READBACK_PASS_RESTART_UNVERIFIED"),
+    ("wrong_skeleton", "STRUCTURAL_READBACK_FAIL"),
+    ("unknown_skeleton", "STRUCTURAL_READBACK_INCOMPLETE"),
+])
+def test_saved_rig_identity_is_checked_from_native_assets(tmp_path, case, status):
+    _root, jobfile, candidate, fake, assets, actors = fixture(tmp_path)
+    manifest = json.loads((candidate / "automatic-setup.json").read_text())
+    for row in manifest["imports"]:
+        row["character"] = "Hero"
+    _write(candidate / "automatic-setup.json", manifest)
+    mesh = assets["/Game/Auto/Hero"]
+    animation = assets["/Game/Auto/Wave"]
+    skeleton = Asset("Skeleton")
+    skeleton.get_path_name = lambda: "/Game/Auto/Rig.Rig"
+    other = Asset("Skeleton")
+    other.get_path_name = lambda: "/Game/Auto/Other.Other"
+    mesh.get_path_name = lambda: "/Game/Auto/Hero.Hero"
+    mesh.get_editor_property = lambda name: skeleton
+    animation.get_path_name = lambda: "/Game/Auto/Wave.Wave"
+    animation.get_editor_property = lambda name: (
+        other if case == "wrong_skeleton" else None if case == "unknown_skeleton" else skeleton)
+    fake.SkeletalMeshComponent = object()
+    actors[0].get_components_by_class = lambda cls: [NS(get_skeletal_mesh_asset=lambda: mesh)]
+    result = AUDIT.audit(jobfile, candidate / "rig-audit.json", unreal_api=fake)
+    assert result["status"] == status
+    assert len(result["rig_identities"]) == 1
+    assert result["fidelity_verified"] is False

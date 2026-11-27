@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
 if str(ROOT/'tools') not in sys.path:
     sys.path.insert(0,str(ROOT/'tools'))
+import rig_identity
 import studio_auto_assets as assets_plan
 import studio_light_properties
 import studio_material_restore
@@ -112,7 +113,7 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
              'status':'BLOCKED','actors_created':[],'assets_imported':[],
              'asset_operations':[],'actor_operations':[],'failed_step':None,
              'level_saved':False,'changes_possible':False,'fidelity_verified':False,
-              'material_restoration':[], 'light_property_setup':[],
+              'material_restoration':[], 'light_property_setup':[], 'rig_identity_setup':[],
              'unsupported':['Unity .mat materials/shader graphs are not reconstructed; FBX embedded materials are optional and partial',
                             'Unity particle/VFX/constraints/scripts and signal payloads are not reconstructed',
                             'Imported animation bone correspondence and audio playback are not verified']}
@@ -224,8 +225,9 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
                     meshes[row.get('character')]=result
                 if kind=='StaticMesh':
                     props[row['target_asset_path']]=result
-                if kind=='AnimSequence' and str(result.get_editor_property('skeleton').get_path_name())!=str(skeleton.get_path_name()):
-                    raise AutomaticSetupError('Animation imported onto wrong skeleton: '+row['target_asset_path'])
+                if kind=='AnimSequence':
+                    if rig_identity.skeleton_identity(result)!=rig_identity.asset_identity(skeleton, 'Skeleton'):
+                        raise AutomaticSetupError('Animation imported onto wrong skeleton: '+row['target_asset_path'])
                 operation['status']='NATIVE_CLASS_CHECKED'
                 receipt['assets_imported'].append({'kind':kind,'path':row['target_asset_path']})
                 receipt['failed_step']=None
@@ -266,6 +268,10 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
             actor.set_actor_label(row['label'],mark_dirty=True)
             if actor.get_actor_label()!=row['label']:
                 raise AutomaticSetupError('Unreal renamed actor unexpectedly: '+row['name'])
+            if kind=='entity.character':
+                receipt['failed_step']={'phase':'rig_identity_setup','name':row['name']}
+                measurement=rig_identity.verify_mesh(actor, meshes[row['name']], api)
+                receipt['rig_identity_setup'].append(dict(measurement, actor=row['name']))
             if row.get('source_primitive'):
                 component = actor.get_component_by_class(api.StaticMeshComponent)
                 mesh = component.get_editor_property('static_mesh') if component is not None else None

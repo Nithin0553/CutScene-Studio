@@ -487,9 +487,15 @@ def test_source_only_studio_candidate_uses_hierarchy_enabled_mapping_copy(tmp_pa
         return {"ced_preflight": "REVIEW_REQUIRED",
                 "track_coverage": {"NATIVE_UNVERIFIED": 1}}
 
+    # Exercise the mixed-suite import order: the wrapper has not been loaded
+    # yet and the source-only planner is temporarily replaced by a test double.
+    # Importing the unused wrapper here would retain the fake planner even
+    # after monkeypatch restores sys.modules.
+    monkeypatch.delitem(sys.modules, "studio_candidate", raising=False)
     monkeypatch.setitem(sys.modules, "prepared_transfer",
                         SimpleNamespace(prepare=fake_prepared))
     result = bridge.prepare(work)
+    assert "studio_candidate" not in sys.modules
     assert observed["hierarchy"] is True
     assert result["engine_generation_executed"] is False
     assert Path(config["mapping"]).read_bytes() == original

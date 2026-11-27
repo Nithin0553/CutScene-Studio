@@ -83,6 +83,12 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Mixed-suite candidate import regression correction
+
+- Owner ran the six-module targeted regression at bdd5b06: 155 passed, two failed in 65.07 s. Failures were test_studio_candidate_command_prepares_and_verifies_saved_ai_report (SimpleNamespace has no PreparedTransferError) and test_candidate_helper_binds_explicit_target_project (fake_prepared unexpected keyword). Both are consistent with a cached mock from test_source_only_studio_candidate_uses_hierarchy_enabled_mapping_copy, not a demonstrated AI execution or conversion failure. Source inspection confirms the source-only bridge imports studio_candidate unconditionally while that test has temporarily substituted prepared_transfer; the wrapper retains the mock as a module global after monkeypatch restores sys.modules.
+- Moved studio_candidate import in tools/studio_local_bridge.py to the capture-assisted branch, the only caller of prepare_candidate. Source-only flow continues calling its existing prepared_transfer directly. Strengthened the existing hierarchy test to simulate an initially absent wrapper and assert it is not imported under the mock. No changes to conversion, immutable verification, authorization, or source/target evidence. The existing two real candidate tests remain intact.
+- Correction not executed remotely. Rerun the same six modules in the same order (expected 157 passes if no other failures), followed by Node UI and Ruff. Latest confirmed full suite remains 822 passed/seven external skips. PR #1 remains draft; no workflow runs returned for bdd5b06. Comprehensive new authorization tests and new-map preflight are still pending; keep all engines and Ollama closed.
+
 ### 2026-11-26 — Explicit AI execution authorization and existing-map integration (software checkpoint)
 
 - Resumed from da5505e81ea91a642d602dd65db064f3bdab20c2; draft PR #1 open, no current PR workflow runs or combined statuses. Read root instructions and existing host, worker, native inspector, verifier and UI/test paths. Latest owner-confirmed results remain 75 targeted Python tests and 19 UI scenarios; latest full run remains 822 passed/seven external skips.

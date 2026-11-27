@@ -506,8 +506,6 @@ def prepare(folder: Path = WORKSPACE, options: dict[str, Any] | None = None) -> 
     tools_dir = ROOT / 'tools'
     if str(tools_dir) not in sys.path:
         sys.path.insert(0, str(tools_dir))
-    from studio_candidate import prepare_candidate
-
     candidate_id = datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ') + '_' + uuid.uuid4().hex[:8]
     candidate_dir = folder / 'candidates' / candidate_id
     old_sequence = config['base_sequence']
@@ -519,6 +517,10 @@ def prepare(folder: Path = WORKSPACE, options: dict[str, Any] | None = None) -> 
         analysis_report = _analyze_source(Path(config['csir']), analysis_path)
     ai_options = {'analysis_path': analysis_path} if analysis_path is not None else {}
     if config.get('capture'):
+        # The source-only path uses prepared_transfer directly. Avoid loading
+        # a second wrapper (and caching its dependencies) when it is unused.
+        from studio_candidate import prepare_candidate
+
         extra = {'transfer_options': overrides} if overrides else {}
         if ai_enabled:
             extra['target_project'] = Path(config['target_project'])

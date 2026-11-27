@@ -2,6 +2,8 @@
 
 import copy
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -600,3 +602,75 @@ def test_studio_ai_opt_in_requires_boolean_and_does_not_infer_when_disabled(
             bridge.prepare(work, {"enable_ai_agent": enabled})
         assert not (work / "active-candidate.json").exists()
     assert not agent.calls
+
+
+@pytest.mark.parametrize("mode", ["valid", "tampered", "legacy", "missing_setup"])
+def test_editor_ai_verifier_in_fresh_isolated_python(handoff_files, tmp_path, mode):
+    import prepared_transfer
+
+    _, paths, _ = handoff_files
+    source, mapping, analysis = paths
+    candidate = tmp_path / "editor-replay"
+    session = prepared_transfer.prepare(
+        source, mapping, candidate,
+        analysis_path=None if mode == "legacy" else analysis,
+    )
+    if mode == "tampered":
+        report = candidate / "ai-handoff.json"
+        report.write_bytes(report.read_bytes() + b"\n")
+    before = {path: path.read_bytes() for path in [*paths, *candidate.iterdir()]}
+    root = Path(__file__).resolve().parents[2]
+    script = f"""
+import sys
+import importlib.abc
+import socket
+
+class NoEngineOrInference(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in ('langgraph', 'unreal'):
+            raise ImportError('Unexpected engine or inference import: ' + fullname)
+        return None
+
+def no_network(*args, **kwargs):
+    raise AssertionError('Replay must not make network requests')
+
+sys.meta_path.insert(0, NoEngineOrInference())
+socket.create_connection = no_network
+socket.socket.connect = no_network
+sys.path.insert(0, {str(root / "integrations" / "unreal")!r})
+import studio_ai_verifier
+args = ['--candidate', {str(candidate)!r}]
+if {mode == "missing_setup"!r}:
+    args.append('--require-setup')
+raise SystemExit(studio_ai_verifier.main(args))
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script], cwd=tmp_path,
+        text=True, capture_output=True, check=False,
+    )
+    if mode == "valid":
+        assert result.returncode == 0, result.stdout + result.stderr
+        proof = json.loads(result.stdout)
+        assert proof["status"] == "AI_EVIDENCE_REPLAY_VERIFIED"
+        assert proof["session_id"] == session["session_id"]
+        assert proof["proposed_mappings"] == proof["attributed_proposals"] == 1
+        assert proof["backend_actions"]["transform"] == 1
+        assert len(proof["artifact_sha256"]) == 4
+        assert proof["automatic_setup"] is None
+        assert proof["execution_authorized"] is False
+        assert proof["engine_generation_executed"] is False
+        assert proof["behavioral_fidelity_established"] is False
+        assert "packages.studio.source_evidence" in proof["canonical_modules"]
+    else:
+        assert result.returncode == 2, result.stdout + result.stderr
+        proof = json.loads(result.stderr)
+        assert proof["status"] == "AI_EVIDENCE_REPLAY_BLOCKED"
+        assert proof["execution_authorized"] is False
+        expected = {
+            "tampered": "Prepared artifact modified",
+            "legacy": "Expected an AI-assisted",
+            "missing_setup": "automatic-setup.json",
+        }[mode]
+        assert expected in proof["reason"]
+    assert set(candidate.iterdir()) == {path for path in before if path.parent == candidate}
+    assert all(path.read_bytes() == data for path, data in before.items())

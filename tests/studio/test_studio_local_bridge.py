@@ -658,3 +658,16 @@ def test_queue_refuses_stale_worker_before_job_or_asset_mutation(tmp_path, monke
     with pytest.raises(ValueError, match='cached an outdated Python worker'):
         bridge.queue_trial(candidate, work)
     assert not (work / 'active-job.json').exists()
+
+
+def test_invalid_ai_toggle_and_non_object_request_return_422(service):
+    base, tmp = service
+    token = call(base + '/api/status')[1]['token']
+    assert call(base + '/api/connect', fixture_files(tmp), token)[0] == 200
+    status, result = call(base + '/api/prepare', {'enable_ai_agent': 'true'}, token)
+    assert status == 422
+    assert 'enable_ai_agent must be Boolean' in result['error']
+    status, result = call(base + '/api/prepare', [], token)
+    assert status == 422
+    assert 'Expected JSON request object' in result['error']
+    assert not (tmp / 'work/active-candidate.json').exists()

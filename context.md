@@ -83,6 +83,12 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Expanded immutable scene candidate and 812-test baseline passed
+
+- Owner confirmed expanded Benchmark001 candidate: immutable replay true, automatic setup manifest verification true, 11 planned actors, five imports, ready true, zero blockers. Seven source-identified Cube mesh references, two camera actors, character root and Directional Light. 21 actions: transform 10, camera_setup 2, camera_cut 2, camera_fov 1, skeletal_animation 1, audio 1, marker 1, property_float 2, property_bool 1. Compared with prior live 13 actions: seven additional transforms and one Boolean property. No engine mutation performed. Nine entities without independent bindings remain explicit (seven character renderers, hierarchy group, audio source); native geometry, materials, lighting, collision, skeleton and audio behavior unverified. Unity .mat/URP/sky/ambient and AudioListener limitations remain.
+- Owner full regression: 812 passed, 7 skipped in 128.89 s; all seven are original external Stage 4 evidence fixtures. No failures. This confirms all eight new static actor/Cube test cases with the existing automated suite; Node baseline 18 scenarios previously confirmed. No application changes in this checkpoint.
+- Reviewed studio_planner_sync.py and AI replay dependencies: native sync currently prioritizes bare planner module paths, but AI handoff replay imports qualified packages.studio modules and requires jsonschema. LangGraph import is lazy and no inference is needed to replay decisions. Next add a read-only verifier entrypoint with explicit canonical repository package paths, dependency checks and separate AI replay refresh, then test with the same expanded candidate using a fresh Python process. Do not enable host/UI native execution until verification and authorization integration are tested; do not launch editors or write to source projects in this checkpoint. Draft PR #1 remains open; no PR workflow runs returned for prior HEAD.
+
 ### 2026-11-26 — Actual expanded scene mapping validated
 
 - Owner confirmed read-only discovery against actual Benchmark001: 20 source entities, 11 mapped actors (character root, both Timeline cameras, moving prop, six static environment props, Directional Light), seven exact built-in Cube mappings. No independent character renderer duplicates; no editor changes. This verifies the source classification milestone, not native staging or fidelity.

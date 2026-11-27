@@ -359,3 +359,106 @@ def test_ai_handoff_rejects_changed_evidence(handoff_files, change):
     }
     with pytest.raises(backend.TransferBackendError, match=expected_error[change]):
         backend.inspect_ai_handoff(*paths)
+
+
+def test_ai_candidate_binds_analysis_and_preserves_deterministic_plan(handoff_files, tmp_path):
+    import prepared_transfer
+
+    backend, paths, _ = handoff_files
+    source, mapping, analysis = paths
+    before = [path.read_bytes() for path in paths]
+    legacy = tmp_path / "legacy"
+    candidate = tmp_path / "ai"
+    plain = prepared_transfer.prepare(source, mapping, legacy)
+    session = prepared_transfer.prepare(source, mapping, candidate, analysis_path=analysis)
+    assert "ai_analysis" not in plain
+    assert session["session_id"] != plain["session_id"]
+    assert session["ai_analysis"]["sha256"] == prepared_transfer._sha(analysis)
+    assert session["stage"] == "AWAITING_UNREAL_PREFLIGHT"
+    assert session["engine_generation_executed"] is False
+    assert session["behavioral_fidelity_established"] is False
+    assert prepared_transfer.verify(candidate) == session
+    assert prepared_transfer.verify(legacy) == plain
+    assert set(session["artifact_sha256"]) == set(plain["artifact_sha256"]) | {
+        "ai-handoff.json"
+    }
+    for name in plain["artifact_sha256"]:
+        assert (candidate / name).read_bytes() == (legacy / name).read_bytes()
+    saved = json.loads((candidate / "ai-handoff.json").read_text(encoding="utf-8"))
+    assert saved == backend.inspect_ai_handoff(*paths)
+    assert saved["tracks"][0]["proposal_attributed"] is True
+    assert saved["execution_authorized"] is False
+    assert [path.read_bytes() for path in paths] == before
+
+
+@pytest.mark.parametrize("change", [
+    "analysis_bytes", "inspection_bytes", "inspection_rehashed",
+    "detached_analysis", "missing_manifest_entry",
+])
+def test_ai_candidate_rejects_changed_evidence(handoff_files, tmp_path, change):
+    import prepared_transfer
+
+    _, paths, _ = handoff_files
+    source, mapping, analysis = paths
+    candidate = tmp_path / "ai"
+    session = prepared_transfer.prepare(source, mapping, candidate, analysis_path=analysis)
+    inspection_path = candidate / "ai-handoff.json"
+    if change == "analysis_bytes":
+        analysis.write_bytes(analysis.read_bytes() + b"\n")
+        expected = "AI source analysis changed"
+    elif change in {"inspection_bytes", "inspection_rehashed"}:
+        inspection = json.loads(inspection_path.read_text(encoding="utf-8"))
+        inspection["execution_authorized"] = True
+        inspection_path.write_text(json.dumps(inspection), encoding="utf-8")
+        expected = "Prepared artifact modified"
+        if change == "inspection_rehashed":
+            session["artifact_sha256"]["ai-handoff.json"] = prepared_transfer._sha(
+                inspection_path
+            )
+            expected = "Prepared AI handoff differs"
+    elif change == "detached_analysis":
+        del session["ai_analysis"]
+        expected = "Session identity mismatch"
+    else:
+        del session["artifact_sha256"]["ai-handoff.json"]
+        expected = "artifact manifest"
+    (candidate / "session.json").write_text(json.dumps(session), encoding="utf-8")
+    with pytest.raises(prepared_transfer.PreparedTransferError, match=expected):
+        prepared_transfer.verify(candidate)
+
+
+def test_ai_candidate_rejects_unmatched_proposal_before_output(
+    handoff_files, csir, tmp_path,
+):
+    import prepared_transfer
+
+    _, paths, _ = handoff_files
+    source_path, mapping_path, analysis_path = paths
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    source["entities"].append({
+        "entity_id": "camera", "ced_type": "entity.camera", "name": "Camera",
+    })
+    source["tracks"].append(csir["tracks"][2])
+    mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+    mapping["entities"] = {"Camera": {"actor_label": "CameraUE"}}
+    report = SourceEvidence(source, MappingResources()).analyze_scene(FakeAgent())
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+    mapping_path.write_text(json.dumps(mapping), encoding="utf-8")
+    analysis_path.write_text(json.dumps(report), encoding="utf-8")
+    out = tmp_path / "blocked"
+    with pytest.raises(prepared_transfer.PreparedTransferError, match="matching backend action"):
+        prepared_transfer.prepare(source_path, mapping_path, out, analysis_path=analysis_path)
+    assert not out.exists()
+
+
+def test_ai_candidate_rejects_invalid_analysis_before_output(handoff_files, tmp_path):
+    import prepared_transfer
+
+    backend, paths, report = handoff_files
+    source, mapping, analysis = paths
+    report["execution_authorized"] = True
+    analysis.write_text(json.dumps(report), encoding="utf-8")
+    out = tmp_path / "blocked"
+    with pytest.raises(backend.TransferBackendError, match="complete, advisory source analysis"):
+        prepared_transfer.prepare(source, mapping, out, analysis_path=analysis)
+    assert not out.exists()

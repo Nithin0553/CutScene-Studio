@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 SYNC = ROOT / "integrations" / "unreal" / "studio_planner_sync.py"
 BUILDER = ROOT / "integrations" / "unreal" / "build_level_sequence.py"
@@ -153,3 +155,67 @@ def test_worker_heartbeat_pins_running_python_code_not_current_disk_only():
     assert "'worker_source_sha256': WORKER_SOURCE_SHA256" in worker
     assert "'checkout_root': str(ROOT.resolve())" in worker
     assert "job['failure_stage'] = job.get('execution_stage'" in worker
+
+
+@pytest.mark.parametrize("case", ["stale", "shadowed", "missing_dependency"])
+def test_ai_replay_sync_in_isolated_python(tmp_path, case):
+    script = f"""
+import sys
+import importlib.abc
+from pathlib import Path
+root = Path({str(ROOT)!r})
+sys.path.insert(0, str(root / 'integrations/unreal'))
+import studio_planner_sync as sync
+
+case = {case!r}
+if case == 'missing_dependency':
+    class MissingSchema(importlib.abc.MetaPathFinder):
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == 'jsonschema':
+                raise ModuleNotFoundError('fixture: jsonschema unavailable')
+            return None
+    sys.meta_path.insert(0, MissingSchema())
+    # Ordinary deterministic planner sync must not require AI dependencies.
+    assert sync.synchronize()
+    try:
+        sync.synchronize_ai()
+    except sync.PlannerSyncError as exc:
+        assert 'jsonschema' in str(exc)
+    else:
+        raise AssertionError('Missing AI dependency was accepted')
+else:
+    sync.synchronize_ai()
+    from packages.studio import source_evidence
+    if case == 'stale':
+        source_evidence.SourceEvidence = None
+        origins = sync.synchronize_ai()
+        assert source_evidence.SourceEvidence is not None
+        assert origins['packages.studio.source_evidence'] == str(
+            root / 'packages/studio/source_evidence.py'
+        )
+    else:
+        source_evidence.__file__ = str(Path.cwd() / 'foreign.py')
+        try:
+            sync.synchronize_ai()
+        except sync.PlannerSyncError as exc:
+            assert 'shadowed packages.studio.source_evidence' in str(exc)
+        else:
+            raise AssertionError('Foreign replay module was accepted')
+print('AI_SYNC_CHECKED')
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script], cwd=tmp_path,
+        text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "AI_SYNC_CHECKED" in result.stdout
+
+
+def test_worker_checks_ai_replay_and_blocks_before_native_mutation():
+    worker = WORKER.read_text(encoding="utf-8")
+    segment = worker[worker.index("def _execute(job):"):]
+    assert segment.index("studio_planner_sync.synchronize_ai()") < segment.index(
+        "prepared_transfer.verify(candidate_dir)"
+    ) < segment.index(
+        "AI evidence verified; native AI execution is not enabled yet."
+    ) < segment.index("\n    _ensure_target_level(job)")

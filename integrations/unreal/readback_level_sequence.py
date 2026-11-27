@@ -22,7 +22,6 @@ if str(SCRIPT_DIR) not in sys.path:
 import readback_math
 import unreal_compat
 
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -36,7 +35,7 @@ def _editor_property(value: Any, name: str, default: Any = None) -> Any:
         return default
     try:
         return getter(name)
-    except Exception:  # noqa: BLE001 - native reflected properties may raise engine/plugin errors.
+    except Exception:
         LOGGER.debug("Native property readback unavailable: %s", name, exc_info=True)
         return default
 
@@ -49,7 +48,7 @@ def _class_name(value: Any) -> str:
             get_name = getattr(unreal_class, "get_name", None)
             if callable(get_name):
                 return str(get_name())
-        except Exception:  # noqa: BLE001 - native reflection fallback.
+        except Exception:
             LOGGER.debug("Native class name unavailable", exc_info=True)
     return type(value).__name__
 
@@ -156,14 +155,14 @@ def _track_display_name(track: Any) -> str:
     if callable(getter):
         try:
             return str(getter())
-        except Exception:  # noqa: BLE001 - native track accessor fallback.
+        except Exception:
             LOGGER.debug("Track display name unavailable via direct accessor", exc_info=True)
     extensions = getattr(unreal, "MovieSceneTrackExtensions", None)
     extension_getter = getattr(extensions, "get_display_name", None) if extensions else None
     if callable(extension_getter):
         try:
             return str(extension_getter(track))
-        except Exception:  # noqa: BLE001 - native extension accessor fallback.
+        except Exception:
             LOGGER.debug("Track display name unavailable via extension", exc_info=True)
     return ""
 
@@ -238,7 +237,7 @@ def _object_binding_guid(binding_id: Any) -> str:
     if callable(getter):
         try:
             return _guid_key(getter())
-        except Exception:  # noqa: BLE001 - native binding accessor fallback.
+        except Exception:
             LOGGER.debug("Direct binding GUID accessor failed", exc_info=True)
     guid = _editor_property(binding_id, "guid")
     return _guid_key(guid)
@@ -379,14 +378,14 @@ def _fixed_play_rate(params: Any) -> float:
     if callable(getter):
         try:
             return float(getter())
-        except Exception:  # noqa: BLE001 - native time-warp accessor fallback.
+        except Exception:
             LOGGER.debug("Direct fixed play rate accessor failed", exc_info=True)
     extensions = getattr(unreal, "MovieSceneTimeWarpExtensions", None)
     extension_getter = getattr(extensions, "to_fixed_play_rate", None) if extensions else None
     if callable(extension_getter):
         try:
             return float(extension_getter(play_rate))
-        except Exception:  # noqa: BLE001 - legacy native time-warp fallback.
+        except Exception:
             LOGGER.debug("Fixed play rate unavailable via extension", exc_info=True)
     return 1.0
 
@@ -515,7 +514,7 @@ def _editor_world() -> Any:
             getter = getattr(subsystem, "get_editor_world", None)
             if callable(getter):
                 return getter()
-        except Exception:  # noqa: BLE001 - native subsystem fallback.
+        except Exception:
             LOGGER.debug("Editor world unavailable via subsystem", exc_info=True)
     library = getattr(unreal, "EditorLevelLibrary", None)
     getter = getattr(library, "get_editor_world", None) if library else None
@@ -533,7 +532,7 @@ def _bound_object(sequence: Any, binding: Any) -> Any | None:
             objects = list(locator(sequence, binding, world))
             if len(objects) == 1:
                 return objects[0]
-        except Exception:  # noqa: BLE001 - native binding resolution may fail.
+        except Exception:
             LOGGER.debug("Native bound object resolution failed", exc_info=True)
     return None
 
@@ -634,7 +633,7 @@ def _audio_section(section: Any) -> dict[str, Any]:
                 sound = getter()
                 if sound is not None:
                     break
-            except Exception:  # noqa: BLE001 - native audio accessor fallback.
+            except Exception:
                 LOGGER.debug("Audio asset unavailable via %s", name, exc_info=True)
     if sound is None:
         sound = _editor_property(section, "sound")
@@ -644,7 +643,7 @@ def _audio_section(section: Any) -> dict[str, Any]:
     if callable(getter):
         try:
             loop = bool(getter())
-        except Exception:  # noqa: BLE001 - preserve legacy native looping fallback.
+        except Exception:
             LOGGER.debug("Native audio looping accessor failed", exc_info=True)
     else:
         loop = bool(_editor_property(section, "looping", False))
@@ -665,7 +664,7 @@ def _marked_frames(sequence: Any) -> list[dict[str, Any]]:
     if callable(getter):
         try:
             frames = list(getter(unreal.MovieSceneTimeUnit.DISPLAY_RATE))
-        except Exception:  # noqa: BLE001 - native marked-frame accessor fallback.
+        except Exception:
             LOGGER.debug("Direct marked-frame accessor failed", exc_info=True)
             frames = []
     if not frames:
@@ -702,7 +701,7 @@ def readback(
     if callable(set_time):
         try:
             set_time(0)
-        except Exception:  # noqa: BLE001 - editor positioning is best effort.
+        except Exception:
             LOGGER.debug("Could not position Sequencer at frame zero", exc_info=True)
 
     rate = _frame_rate(sequence.get_display_rate())
@@ -784,7 +783,7 @@ def readback(
                 if component is None and actor is not None:
                     try:
                         component = _camera_component_for_actor(actor)
-                    except Exception:  # noqa: BLE001 - native camera-component probe.
+                    except Exception:
                         LOGGER.debug("Camera component readback unavailable", exc_info=True)
                         component = None
                 if component is not None:

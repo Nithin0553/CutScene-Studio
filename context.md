@@ -83,6 +83,12 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-27 — Audio readback redundant lint directives
+
+- Owner fast-forwarded to a479de1 and reran the seven-file Ruff check: 15 remaining diagnostics, all in readback_level_sequence.py (one I001 blank line and 14 RUF100 unused BLE001 directives). Ruff recognizes contextual exception logging, so the added suppressions on logged handlers are unnecessary.
+- Removed exactly the 14 reported redundant directives and the extra import-block blank line. Retained the single BLE001 directive on root-motion sampling where the exception is recorded in evidence rather than logged and Ruff did not flag it as unused. Exception handling, logging, validation, tests and transfer behavior unchanged. No global lint suppression.
+- Latest owner-confirmed Python baseline remains 252 passes in 123.29 s; no audio conversion regression output yet. Re-run seven-file Ruff and six-module audio conversion/validation regression. No need to repeat unchanged UI. Engines and Ollama remain closed; no native execution or fidelity claims. PR #1 remains open draft.
+
 ### 2026-11-26 — Audio adapter lint correction
 
 - Owner reported 37 Ruff diagnostics at 17d89e9; no Python regression output supplied for that revision. Latest verified suite remains 252 targeted passes in 123.29 s, Node 23, prior Ruff clean. Draft PR #1 remains open.

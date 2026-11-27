@@ -138,8 +138,14 @@ def _execute(job):
     # The sync module itself may have been imported prior to a git pull.
     importlib.reload(studio_planner_sync)
     studio_planner_sync.synchronize()
+    # The host does not queue AI jobs yet. Even a manually submitted queue
+    # entry must replay its AI evidence and stop before any native mutation.
+    if "ai_analysis" in _load(candidate_dir / "session.json"):
+        studio_planner_sync.synchronize_ai()
     import prepared_transfer
     prepared = prepared_transfer.verify(candidate_dir)
+    if prepared.get("ai_analysis") is not None:
+        raise RuntimeError('AI evidence verified; native AI execution is not enabled yet.')
     if prepared['source']['csir_path'] != job['csir'] or prepared['target']['mapping_path'] != job['mapping']:
         raise RuntimeError('Prepared evidence does not match submitted job.')
     if prepared['target']['sequence_asset_path'] != job['sequence_path']:

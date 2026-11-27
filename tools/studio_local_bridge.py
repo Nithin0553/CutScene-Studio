@@ -14,7 +14,7 @@ import secrets
 import sys
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -30,7 +30,7 @@ LOCK = threading.RLock()
 def load_json(path: Path) -> dict[str, Any]:
     obj = json.loads(path.read_text(encoding='utf-8-sig'))
     if not isinstance(obj, dict):
-        raise ValueError('Expected a JSON object: ' + str(path))
+        raise TypeError('Expected a JSON object: ' + str(path))
     return obj
 
 
@@ -135,14 +135,14 @@ def worker_connected(folder: Path = WORKSPACE) -> dict[str, Any]:
         return {'connected': False}
     try:
         data = load_json(marker)
-        tick = datetime.fromisoformat(str(data['heartbeat']).replace('Z', '+00:00'))
-        age = (datetime.now(timezone.utc) - tick).total_seconds()
+        tick = datetime.fromisoformat(str(data['heartbeat']))
+        age = (datetime.now(UTC) - tick).total_seconds()
         return {'connected': 0 <= age < 8, 'project': data.get('project'),
                 'level': data.get('level'), 'worker_version': data.get('worker'),
                 'worker_source_sha256': data.get('worker_source_sha256'),
                 'checkout_root': data.get('checkout_root'),
                 'age_seconds': round(age, 1)}
-    except (ValueError, KeyError, OSError):
+    except (ValueError, TypeError, KeyError, OSError):
         return {'connected': False}
 
 
@@ -238,8 +238,8 @@ def destination_readiness(folder: Path = WORKSPACE) -> dict[str, Any]:
         return unavailable('The Unreal companion is connected, but has not produced a scene inspection. Check its Python log and restart the companion if needed.')
     try:
         report = load_json(report_file)
-        stamp = datetime.fromisoformat(str(report['checked_at']).replace('Z', '+00:00'))
-        age = (datetime.now(timezone.utc) - stamp).total_seconds()
+        stamp = datetime.fromisoformat(str(report['checked_at']))
+        age = (datetime.now(UTC) - stamp).total_seconds()
         if not 0 <= age < 8 or report.get('kind') != 'cutsceneai.studio.destination_readiness':
             return unavailable('The scene inspection has expired or is invalid. Check the Unreal Python log and restart the editor companion.')
         if report.get('candidate_id') != candidate_id or report.get('sequence_path') != candidate.get('sequence_path'):
@@ -316,7 +316,7 @@ def prepare(folder: Path = WORKSPACE, options: dict[str, Any] | None = None) -> 
     request = dict(options or {})
     ai_enabled = request.pop('enable_ai_agent', False)
     if not isinstance(ai_enabled, bool):
-        raise ValueError('enable_ai_agent must be Boolean.')
+        raise TypeError('enable_ai_agent must be Boolean.')
     overrides = studio_ui_features.validate_options(config, request)
     active_job = folder / 'active-job.json'
     if active_job.is_file():
@@ -328,7 +328,7 @@ def prepare(folder: Path = WORKSPACE, options: dict[str, Any] | None = None) -> 
         sys.path.insert(0, str(tools_dir))
     from studio_candidate import prepare_candidate
 
-    candidate_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '_' + uuid.uuid4().hex[:8]
+    candidate_id = datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ') + '_' + uuid.uuid4().hex[:8]
     candidate_dir = folder / 'candidates' / candidate_id
     old_sequence = config['base_sequence']
     new_sequence = old_sequence + '_STUDIO_' + candidate_id[-8:].upper()
@@ -490,7 +490,7 @@ def approve_one_click(candidate_id: str, folder: Path = WORKSPACE) -> dict[str, 
         'source_csir': config['csir'],
         'target_project': config['target_project'],
         'target_level': config['level_path'],
-        'approved_at': datetime.now(timezone.utc).isoformat(),
+        'approved_at': datetime.now(UTC).isoformat(),
     })
     return {'approved': True, 'candidate_id': candidate_id}
 
@@ -572,7 +572,7 @@ def queue_trial(candidate_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
            'expected_project': config['target_project'],
            'expected_level': config['level_path'],
            'create_level': bool(config.get('auto_create_level')),
-           'created_at': datetime.now(timezone.utc).isoformat(),
+           'created_at': datetime.now(UTC).isoformat(),
            'generation_status': 'NOT_STARTED', 'fidelity_verified': False}
     atomic_json(folder / 'jobs' / (job_id + '.json'), job)
     atomic_json(folder / 'active-job.json', {'job_id': job_id})
@@ -781,12 +781,12 @@ def create_handler(webroot: Path, folder: Path = WORKSPACE):
             if path.startswith('/api/jobs/'):
                 try:
                     return self.reply(200, job_status(path.rsplit('/', 1)[-1], folder))
-                except ValueError as e:
+                except (ValueError, TypeError) as e:
                     return self.reply(404, {'error': str(e)})
             if path.startswith('/api/diagnostic/'):
                 try:
                     return self.reply(200, diagnostic_summary(path.rsplit('/', 1)[-1], folder))
-                except ValueError as e:
+                except (ValueError, TypeError) as e:
                     return self.reply(404, {'error': str(e)})
             if path == '/api/closed-loop':
                 active_path = folder / 'active-job.json'
@@ -826,7 +826,7 @@ def create_handler(webroot: Path, folder: Path = WORKSPACE):
             try:
                 data = json.loads(self.rfile.read(int(size_str)))
                 if not isinstance(data, dict):
-                    raise ValueError('Expected JSON request object.')
+                    raise TypeError('Expected JSON request object.')
                 route = urlparse(self.path).path
                 with LOCK:
                     if route == '/api/pick-folder':
@@ -875,7 +875,7 @@ def create_handler(webroot: Path, folder: Path = WORKSPACE):
                     else:
                         return self.reply(404, {'error': 'Unknown route.'})
                 return self.reply(200, result)
-            except (ValueError, KeyError, OSError, RuntimeError, ImportError) as e:
+            except (ValueError, TypeError, KeyError, OSError, RuntimeError, ImportError) as e:
                 return self.reply(422, {'error': str(e)})
 
     return StudioHandler

@@ -463,3 +463,49 @@ def test_ai_candidate_rejects_invalid_analysis_before_output(handoff_files, tmp_
     with pytest.raises(backend.TransferBackendError, match="complete, advisory source analysis"):
         prepared_transfer.prepare(source, mapping, out, analysis_path=analysis)
     assert not out.exists()
+
+
+def test_studio_candidate_command_prepares_and_verifies_saved_ai_report(
+    handoff_files, tmp_path, monkeypatch, capsys,
+):
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.syspath_prepend(str(root / "tools"))
+    import studio_candidate
+
+    _, paths, _ = handoff_files
+    source, mapping, analysis = paths
+    original = mapping.read_bytes()
+    out = tmp_path / "command_candidate"
+    result = studio_candidate.main([
+        "--csir", str(source), "--mapping", str(mapping),
+        "--analysis", str(analysis), "--sequence", "/Game/Staging/LS_Candidate",
+        "--out", str(out),
+    ])
+    assert result == 0
+    assert "Immutable verification passed." in capsys.readouterr().out
+    session = studio_candidate.prepared_transfer.verify(out)
+    assert session["ai_analysis"]["path"] == str(analysis.resolve())
+    assert session["source_capture"] is None
+    assert session["target"]["sequence_asset_path"] == "/Game/Staging/LS_Candidate"
+    assert session["engine_generation_executed"] is False
+    assert len(session["artifact_sha256"]) == 4
+    assert mapping.read_bytes() == original
+
+
+def test_studio_candidate_requires_capture_for_world_lock(
+    handoff_files, tmp_path, monkeypatch,
+):
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.syspath_prepend(str(root / "tools"))
+    import studio_candidate
+
+    _, paths, _ = handoff_files
+    source, mapping, analysis = paths
+    out = tmp_path / "blocked_candidate"
+    with pytest.raises(ValueError, match="requires source CineTwin capture"):
+        studio_candidate.prepare_candidate(
+            source, mapping, None, "/Game/Staging/LS_Blocked", out,
+            skeletal_root_world_lock=True, analysis_path=analysis,
+        )
+    assert not out.exists()
+    assert not out.with_suffix(".mapping.json").exists()

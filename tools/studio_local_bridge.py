@@ -309,7 +309,7 @@ def ai_native_preflight_status(folder: Path = WORKSPACE) -> dict[str, Any]:
                         'reason': 'Waiting for read-only Unreal inspection.'}
             if response.get('status') != 'AI_NATIVE_PREFLIGHT_COMPLETED':
                 return blocked(str(response.get('reason') or 'Native inspection failed.'))
-        report = load_json(folder / 'ai-native-preflight.json')
+        report, report_hash = snapshot(folder / 'ai-native-preflight.json')
         if request is not None and report.get('request_id') != request.get('request_id'):
             return blocked('Native report belongs to a different request.')
         age = (datetime.now(UTC) - datetime.fromisoformat(report['checked_at'])).total_seconds()
@@ -365,7 +365,10 @@ def ai_native_preflight_status(folder: Path = WORKSPACE) -> dict[str, Any]:
         if (digest(folder / 'active-candidate.json') != active_hash
                 or digest(folder / 'connection.json') != config_hash):
             return blocked('Active candidate or connection changed while checking evidence.')
-        return {**report, 'verified': True, 'execution_authorized': False}
+        if digest(folder / 'ai-native-preflight.json') != report_hash:
+            return blocked('Native inspection changed while checking evidence.')
+        return {**report, 'verified': True, 'execution_authorized': False,
+                'report_sha256': report_hash}
     except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError):
         return blocked('Native inspection unavailable or invalid; inspect the active candidate again.')
 
@@ -630,12 +633,50 @@ def prepare(folder: Path = WORKSPACE, options: dict[str, Any] | None = None) -> 
             'decision_counts': analysis_report['decision_counts'],
             'active_ced_alerts': analysis_report['ced_preflight']['active_alert_count'],
             'execution_enabled': False,
-            'reason': 'Native AI verifier integration is pending; preparation only.',
+            'reason': 'Explicit native inspection and candidate-specific approval are required.',
         }
     atomic_json(folder / 'active-candidate.json', info)
     (folder / 'destination-readiness.json').unlink(missing_ok=True)
     (folder / 'active-job.json').unlink(missing_ok=True)
     return info
+
+
+def _ai_auth_module():
+    editor = str(ROOT / 'integrations/unreal')
+    if editor not in sys.path:
+        sys.path.insert(0, editor)
+    import studio_ai_execution_auth as auth
+
+    if Path(auth.__file__).resolve() != (Path(editor) / 'studio_ai_execution_auth.py').resolve():
+        raise RuntimeError('AI authorization module belongs to another checkout.')
+    return auth
+
+
+def approve_ai_execution(candidate_id: str, request_id: str, report_sha256: str,
+                         folder: Path = WORKSPACE) -> dict[str, Any]:
+    """Persist explicit intent for exactly the inspected candidate; do not queue."""
+    with LOCK:
+        status = ai_native_preflight_status(folder)
+        if (status.get('verified') is not True or not request_id
+                or status.get('candidate_id') != candidate_id
+                or status.get('request_id') != request_id
+                or status.get('report_sha256') != report_sha256):
+            raise ValueError('Select the current verified native inspection before authorizing.')
+        worker = worker_connected(folder)
+        auth = _ai_auth_module()
+        bound, _, _, _ = auth.binding(
+            folder, candidate_id, worker.get('worker_instance_id'), worker.get('worker_source_sha256'))
+        if bound['record_sha256']['ai-native-preflight.json'] != report_sha256:
+            raise ValueError('Native inspection changed before approval.')
+        if any(load_json(path).get('candidate_id') == candidate_id
+               for path in (folder / 'jobs').glob('*.json')):
+            raise ValueError('This candidate was already submitted; prepare a new candidate.')
+        approval = {'kind': 'cutsceneai.studio.ai_execution_authorization',
+                    'approval_id': uuid.uuid4().hex, 'approved_at': datetime.now(UTC).isoformat(),
+                    'binding': bound}
+        atomic_json(folder / auth.APPROVAL_FILE, approval)
+        return {'approved': True, 'candidate_id': candidate_id,
+                'approval_id': approval['approval_id'], 'execution_queued': False}
 
 
 def approve_one_click(candidate_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
@@ -674,7 +715,7 @@ def approve_one_click(candidate_id: str, folder: Path = WORKSPACE) -> dict[str, 
     return {'approved': True, 'candidate_id': candidate_id}
 
 
-def queue_trial(candidate_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
+def queue_trial(candidate_id: str, folder: Path = WORKSPACE, *, approval_id: str = '') -> dict[str, Any]:
     if not candidate_id.isascii() or not candidate_id.replace('_', '').isalnum():
         raise ValueError('Invalid candidate identity.')
     candidate_dir = (folder / 'candidates' / candidate_id)
@@ -687,8 +728,11 @@ def queue_trial(candidate_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
             sys.path.insert(0, str(p))
     import prepared_transfer
     session = prepared_transfer.verify(candidate_dir)
-    if session.get('ai_analysis') is not None:
-        raise ValueError('AI candidate preparation only; native execution is not enabled.')
+    ai = session.get('ai_analysis') is not None
+    if ai and not approval_id:
+        raise ValueError('AI candidate native execution is not enabled without explicit authorization.')
+    if not ai and approval_id:
+        raise ValueError('AI execution authorization cannot be used for a deterministic candidate.')
     config = load_json(folder / 'connection.json')
     config_check(config)
     if session['source']['csir_path'] != config['csir']:
@@ -709,11 +753,21 @@ def queue_trial(candidate_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
         if stale_reason:
             raise ValueError('Unreal companion update required: ' +
                              companion_upgrade_action(stale_reason))
+    ai_authorization = None
+    if ai:
+        status = ai_native_preflight_status(folder)
+        if status.get('verified') is not True or status.get('candidate_id') != candidate_id:
+            raise ValueError('Fresh native inspection is required before queuing an AI candidate.')
+        auth = _ai_auth_module()
+        approval_hash, _, _, _ = auth.validate(
+            folder, candidate_id, heartbeat.get('worker_instance_id'),
+            heartbeat.get('worker_source_sha256'), approval_id)
+        ai_authorization = {'approval_id': approval_id, 'approval_sha256': approval_hash}
     readiness = destination_readiness(folder)
     candidate_record = folder / 'active-candidate.json'
     auto = load_json(candidate_record).get('automatic_setup') if candidate_record.is_file() else {}
     auto = auto or {}
-    automatic_requested = bool(auto.get('available')) and not readiness.get('ready')
+    automatic_requested = ai or (bool(auto.get('available')) and not readiness.get('ready'))
     if automatic_requested:
         stale_reason = worker_code_mismatch(heartbeat)
         if stale_reason:
@@ -753,6 +807,14 @@ def queue_trial(candidate_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
            'create_level': bool(config.get('auto_create_level')),
            'created_at': datetime.now(UTC).isoformat(),
            'generation_status': 'NOT_STARTED', 'fidelity_verified': False}
+    if ai:
+        # Repeat the authorization after potentially expensive source manifest verification.
+        current_hash, _, _, _ = auth.validate(
+            folder, candidate_id, heartbeat.get('worker_instance_id'),
+            heartbeat.get('worker_source_sha256'), approval_id)
+        if current_hash != ai_authorization['approval_sha256'] or (folder / 'active-job.json').exists():
+            raise ValueError('AI execution authorization changed or another job is active.')
+        job['ai_authorization'] = ai_authorization
     atomic_json(folder / 'jobs' / (job_id + '.json'), job)
     atomic_json(folder / 'active-job.json', {'job_id': job_id})
     return {'job_id': job_id, 'status': 'QUEUED',
@@ -1066,11 +1128,16 @@ def create_handler(webroot: Path, folder: Path = WORKSPACE):
                         result = prepare(folder, data)
                     elif route == '/api/ai-native-preflight':
                         result = request_ai_native_preflight(str(data.get('candidate_id', '')), folder)
+                    elif route == '/api/approve-ai-execution':
+                        result = approve_ai_execution(str(data.get('candidate_id', '')),
+                                                      str(data.get('request_id', '')),
+                                                      str(data.get('report_sha256', '')), folder)
                     elif route == '/api/approve-one-click':
                         result = approve_one_click(
                             str(data.get('candidate_id', '')), folder)
                     elif route == '/api/execute':
-                        result = queue_trial(str(data.get('candidate_id', '')), folder)
+                        result = queue_trial(str(data.get('candidate_id', '')), folder,
+                                             approval_id=str(data.get('approval_id', '')))
                     elif route == '/api/observation':
                         cfg = folder / 'connection.json'
                         if not cfg.is_file():

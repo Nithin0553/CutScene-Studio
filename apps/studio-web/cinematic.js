@@ -21,6 +21,10 @@
   const worker = () => state.status?.unreal_worker || {};
   const readiness = () => state.status?.destination_readiness || {};
   const aiCandidate = () => Boolean(state.candidate?.ai_analysis);
+  const canAuthorizeAI = () => Boolean(aiCandidate() && !state.job && validEditor() &&
+    state.aiPreflight?.verified === true && state.aiPreflight?.request_id &&
+    state.aiPreflight?.report_sha256 && state.aiPreflight?.candidate_id === state.candidate.candidate_id &&
+    state.candidate.automatic_setup?.ready && !connection()?.auto_create_level);
   const terminal = job => job && !['RUNNING','QUEUED'].includes(job.status);
   const generated = () => Boolean(state.job &&
     state.job.generation_status === 'GENERATED_UNVERIFIED' &&
@@ -218,6 +222,8 @@
       '<h3>Read-only Unreal inspection</h3>'+
        '<p class="subnote">'+esc(state.aiPreflight?.verified?'Native setup inspection passed. Import readback and execution approval remain pending.':state.aiPreflight?.reason||'Connect the selected staging level to inspect the candidate.')+'</p>'+
        button('Inspect target (read-only)','inspect-ai-target',state.busy||!validEditor()||!state.candidate.automatic_setup?.ready||state.aiPreflight?.status==='AI_NATIVE_PREFLIGHT_REQUESTED','secondary')+
+       (canAuthorizeAI()?'<p class="subnote">Authorize this exact candidate to import assets, create actors and generate a new sequence in the selected backed-up Unreal map. Fresh verification will run again; fidelity is not guaranteed.</p>'+
+         button('Authorize and transfer','authorize-ai-transfer',state.busy):'')+
        (!validEditor()?'<pre>'+esc(workerCommand())+'</pre>'+button('Copy connection command','copy-worker',false,'secondary'):'')+
        button('Back to projects','projects',false,'secondary')+'</section>';
   }
@@ -583,6 +589,20 @@
         state.aiPreflight=await api('ai-native-preflight',{candidate_id:state.candidate.candidate_id});
         state.info='Read-only inspection requested. No transfer has been authorized.';
       }catch(e){state.error=e.message;state.aiPreflight=null;}
+      finally{state.busy=false;render();}
+      return;
+    }
+    if(name==='authorize-ai-transfer'){
+      if(state.busy||!canAuthorizeAI())return;
+      state.busy=true;state.error='';render();
+      try{
+        const candidate_id=state.candidate.candidate_id;
+        const {request_id,report_sha256}=state.aiPreflight;
+        const approval=await api('approve-ai-execution',{candidate_id,request_id,report_sha256});
+        if(!approval.approved||!approval.approval_id)throw Error('Native execution approval missing.');
+        state.job=await api('execute',{candidate_id,approval_id:approval.approval_id});
+        state.running=true;state.phase='RUNNING';state.info='';
+      }catch(e){state.error=e.message;state.running=false;state.aiPreflight=null;}
       finally{state.busy=false;render();}
       return;
     }

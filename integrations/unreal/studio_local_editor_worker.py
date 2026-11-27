@@ -139,14 +139,14 @@ def _execute(job):
     # The sync module itself may have been imported prior to a git pull.
     importlib.reload(studio_planner_sync)
     studio_planner_sync.synchronize()
-    # The host does not queue AI jobs yet. Even a manually submitted queue
-    # entry must replay its AI evidence and stop before any native mutation.
+    # Replay AI evidence independently of the host before considering authorization.
     if "ai_analysis" in _load(candidate_dir / "session.json"):
         studio_planner_sync.synchronize_ai()
     import prepared_transfer
     prepared = prepared_transfer.verify(candidate_dir)
-    if prepared.get("ai_analysis") is not None:
-        raise RuntimeError('AI evidence verified; native AI execution is not enabled yet.')
+    ai = prepared.get("ai_analysis") is not None
+    if not ai and job.get('ai_authorization'):
+        raise RuntimeError('AI authorization cannot be attached to a deterministic candidate.')
     if prepared['source']['csir_path'] != job['csir'] or prepared['target']['mapping_path'] != job['mapping']:
         raise RuntimeError('Prepared evidence does not match submitted job.')
     if prepared['target']['sequence_asset_path'] != job['sequence_path']:
@@ -171,6 +171,9 @@ def _execute(job):
                                '; '.join(inspected.get('blockers', [])[:8]))
         import studio_auto_scene
         studio_auto_scene.preflight_primitive_meshes(inspected, unreal)
+    if ai:
+        job['execution_stage'] = 'VERIFYING_AI_EXECUTION_AUTHORIZATION'
+        _verify_and_claim_ai_execution(job, candidate_dir)
     job['execution_stage'] = 'PREPARING_DESTINATION_LEVEL'
     _ensure_target_level(job)
     if job.get('automatic_setup'):
@@ -342,6 +345,60 @@ def _execute(job):
                            str(exc))
     return job
 
+
+
+def _verify_and_claim_ai_execution(job, candidate_dir):
+    """Check exact approval, replay native evidence and consume once before mutation."""
+    import studio_ai_execution_auth as auth
+    import studio_ai_native_preflight as inspector
+
+    for module in (auth, inspector):
+        if Path(module.__file__).resolve() != (ROOT / 'integrations/unreal' / (module.__name__ + '.py')).resolve():
+            raise RuntimeError('AI execution verifier belongs to another checkout.')
+        importlib.reload(module)
+    submitted = job.get('ai_authorization') or {}
+    approval_id = submitted.get('approval_id')
+    candidate_id = job['candidate_id']
+    job_id = job['job_id']
+    if not auth.valid_id(job_id) or not auth.valid_id(approval_id):
+        raise RuntimeError('AI evidence verified; explicit execution authorization required.')
+    approval_hash, report, config, session = auth.validate(
+        WORKSPACE, candidate_id, WORKER_INSTANCE_ID, WORKER_SOURCE_SHA256, approval_id)
+    if submitted.get('approval_sha256') != approval_hash:
+        raise RuntimeError('Queued AI authorization differs from persisted approval.')
+    active_job = _load(WORKSPACE / 'active-job.json')
+    if (active_job.get('job_id') != job_id
+            or candidate_dir != (WORKSPACE / 'candidates' / candidate_id).resolve()
+            or job.get('automatic_setup') is not True or job.get('create_level') is not False
+            or Path(job['automatic_setup_manifest']).resolve() != candidate_dir / 'automatic-setup.json'
+            or job['csir'] != config['csir'] or job.get('capture') != config.get('capture')
+            or job['mapping'] != session['target']['mapping_path']
+            or job['sequence_path'] != session['target']['sequence_asset_path']
+            or job['expected_project'] != config['target_project']
+            or job['expected_level'] != config['level_path']
+            or job['sequence_path'] == config['base_sequence']):
+        raise RuntimeError('AI job is not the exact authorized automatic-setup candidate.')
+    jobs = WORKSPACE / 'jobs'
+    if any(path.name != job_id + '.json' and _load(path).get('candidate_id') == candidate_id
+           for path in jobs.glob('*.json')):
+        raise RuntimeError('Duplicate AI candidate job; refusing execution.')
+    claim = jobs / (candidate_id + '.ai-execution.used')
+    if claim.exists():
+        raise RuntimeError('AI candidate authorization was already consumed.')
+    # Fresh independent replay includes source asset manifest verification,
+    # native project/level checks, collision checks and primitive mesh preflight.
+    proof = inspector.inspect_candidate(
+        candidate_dir, expected_project=job['expected_project'],
+        expected_level=job['expected_level'], unreal_api=unreal)
+    auth.match_fresh_proof(report, proof)
+    current_hash, _, _, _ = auth.validate(
+        WORKSPACE, candidate_id, WORKER_INSTANCE_ID, WORKER_SOURCE_SHA256, approval_id)
+    if current_hash != approval_hash or _load(WORKSPACE / 'active-job.json').get('job_id') != job_id:
+        raise RuntimeError('AI approval or active job changed during fresh native inspection.')
+    # An exclusive claim survives failure or restart; a candidate is never replayed.
+    with claim.open('x', encoding='utf-8') as stream:
+        stream.write(job_id + '\n')
+    job['ai_execution_preflight_verified'] = True
 
 
 def inspect_active_ai_candidate(request=None):
@@ -559,6 +616,10 @@ def _tick(_delta):
         for path in sorted(jobs_folder.glob('*.json')):
             job = _load(path)
             if job.get('status') != 'QUEUED':
+                continue
+            # Host publishes the active pointer just after the job file. Do not
+            # race that publication for authorized AI jobs.
+            if job.get('ai_authorization') and not (WORKSPACE / 'active-job.json').is_file():
                 continue
             BUSY = True
             try:

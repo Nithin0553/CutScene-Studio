@@ -217,7 +217,7 @@ def test_worker_checks_ai_replay_and_blocks_before_native_mutation():
     assert segment.index("studio_planner_sync.synchronize_ai()") < segment.index(
         "prepared_transfer.verify(candidate_dir)"
     ) < segment.index(
-        "AI evidence verified; native AI execution is not enabled yet."
+        "_verify_and_claim_ai_execution(job, candidate_dir)"
     ) < segment.index("\n    _ensure_target_level(job)")
 
 

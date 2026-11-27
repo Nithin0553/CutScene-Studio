@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import studio_source_identity as source_identity
+
 
 class DiscoveryError(ValueError):
     pass
@@ -245,8 +247,57 @@ def _safe_label(name: str) -> str:
     return base or 'Item'
 
 
+def _static_actor_ids(entities: dict, selected_ids: set[str]) -> set[str]:
+    """Add active, independently evidenced static meshes and typed lights."""
+    result = set()
+    for eid, entity in entities.items():
+        if eid in selected_ids:
+            continue
+        metadata = entity.get('metadata') or {}
+        if metadata.get('active_self') is not True or not metadata.get('world_transform'):
+            continue
+        # Group/container transforms can be represented by the existing world
+        # poses. Do not duplicate renderer children of a mapped character/prop.
+        parent = str(entity.get('parent_entity_id') or '')
+        seen = {eid}
+        eligible = True
+        while parent:
+            if parent in seen or parent not in entities:
+                eligible = False
+                break
+            seen.add(parent)
+            owner = entities[parent]
+            if (parent in selected_ids or owner.get('ced_type') == 'entity.character'
+                    or (owner.get('metadata') or {}).get('active_self') is not True):
+                eligible = False
+                break
+            parent = str(owner.get('parent_entity_id') or '')
+        if not eligible:
+            continue
+        if entity.get('ced_type') == 'entity.light':
+            if (metadata.get('light') or {}).get('light_type') in {
+                'Directional', 'Point', 'Spot',
+            }:
+                result.add(eid)
+        elif entity.get('ced_type') == 'entity.prop':
+            record = source_identity.direct_renderer_model(entity)
+            if record is None:
+                continue
+            path = str(record.get('asset_path') or '')
+            # Only the known built-in Cube or an explicit project FBX is
+            # eligible. Other primitives/mesh types remain evidence gaps.
+            if source_identity.is_unity_builtin_cube(entity) or (
+                path.startswith('Assets/') and path.lower().endswith('.fbx')
+                and '..' not in path.split('/')
+                and '\\' not in path
+                and bool(source_identity.GUID.fullmatch(str(record.get('guid') or '')))
+            ):
+                result.add(eid)
+    return result
+
+
 def _source_mapping(csir: dict, csir_bytes: bytes, project: str, level: str) -> dict:
-    """Only map track-bound CED actors, never arbitrary source child components."""
+    """Map Timeline actors plus source-evidenced static scene actors."""
     entities = {str(e.get('entity_id')): e for e in csir.get('entities', [])}
     used_ids: set[str] = set()
     for track in csir.get('tracks', []):
@@ -260,6 +311,7 @@ def _source_mapping(csir: dict, csir_bytes: bytes, project: str, level: str) -> 
     for eid, e in entities.items():
         if e.get('ced_type') == 'entity.prop' and str(e.get('parent_entity_id')) in used_ids:
             used_ids.add(eid)
+    used_ids.update(_static_actor_ids(entities, used_ids))
     selected = [entities[eid] for eid in sorted(used_ids)]
     names = [str(x.get('name') or '') for x in selected]
     if not selected or any(not x for x in names) or len(names) != len(set(names)):
@@ -313,9 +365,12 @@ def build_connection(unity_folder: str, unreal_folder: str, csir_path: str, leve
     source = _read_json(csir_file)
     mapping = _source_mapping(source, csir_bytes, unreal['project'], level)
     # Keep generated mappings in the local Studio workspace, never Unity/Unreal project folders.
-    key = hashlib.sha256((str(csir_file) + unreal['project'] + level).encode('utf-8') + csir_bytes).hexdigest()[:24]
-    mapping_path = workspace / 'discovered-mappings' / (key + '.json')
     mapping_text = json.dumps(mapping, sort_keys=True, indent=2, ensure_ascii=False) + '\n'
+    # A new mapping policy must not replace an earlier immutable mapping.
+    # Include the generated mapping itself in the identity of the new file.
+    identity = (str(csir_file) + unreal['project'] + level).encode('utf-8')
+    key = hashlib.sha256(identity + csir_bytes + mapping_text.encode('utf-8')).hexdigest()[:24]
+    mapping_path = workspace / 'discovered-mappings' / (key + '.json')
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
     if mapping_path.exists():
         if mapping_path.read_text(encoding='utf-8') != mapping_text:

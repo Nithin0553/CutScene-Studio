@@ -32,6 +32,7 @@ HANDLE = None
 WORKSPACE = Path.home() / '.cutscene-studio' / 'runs'
 LAST_TICK = 0.0
 BUSY = False
+WORKER_INSTANCE_ID = uuid.uuid4().hex
 
 
 def _load(path):
@@ -347,6 +348,9 @@ def inspect_active_ai_candidate():
     """Explicit read-only preflight, not an execution approval or queue operation."""
     if BUSY:
         raise RuntimeError('Finish the active Unreal job before inspecting another candidate.')
+    report_path = WORKSPACE / 'ai-native-preflight.json'
+    # A failed explicit reinspection must not leave an older passing report.
+    report_path.unlink(missing_ok=True)
     active = _load(WORKSPACE / 'active-candidate.json')
     config = _load(WORKSPACE / 'connection.json')
     candidate_id = str(active.get('candidate_id') or '')
@@ -375,8 +379,15 @@ def inspect_active_ai_candidate():
     if (_load(WORKSPACE / 'active-candidate.json') != active
             or _load(WORKSPACE / 'connection.json') != config):
         raise RuntimeError('Studio connection or candidate changed during native preflight.')
-    return {**proof, 'candidate_id': candidate_id, 'checked_at': _now(),
-            'worker_source_sha256': WORKER_SOURCE_SHA256}
+    report = {**proof, 'candidate_id': candidate_id, 'checked_at': _now(),
+              'worker_source_sha256': WORKER_SOURCE_SHA256,
+              'worker_instance_id': WORKER_INSTANCE_ID,
+              'connection_sha256': hashlib.sha256(
+                  (WORKSPACE / 'connection.json').read_bytes()).hexdigest(),
+              'candidate_record_sha256': hashlib.sha256(
+                  (WORKSPACE / 'active-candidate.json').read_bytes()).hexdigest()}
+    _save(report_path, report)
+    return report
 
 
 def _update_destination_readiness():
@@ -479,6 +490,7 @@ def _write_heartbeat():
         'level': _loaded_level(), 'worker': WORKER_PROTOCOL,
         'checkout_root': str(ROOT.resolve()),
         'worker_source_sha256': WORKER_SOURCE_SHA256,
+        'worker_instance_id': WORKER_INSTANCE_ID,
     })
 
 
@@ -528,7 +540,7 @@ def _tick(_delta):
 
 def start(workspace=None):
     """Starts the worker; no jobs are processed until UI explicitly queues one."""
-    global HANDLE, WORKSPACE
+    global HANDLE, WORKSPACE, WORKER_INSTANCE_ID
     requested = Path(workspace).expanduser().resolve() if workspace is not None else WORKSPACE.resolve()
     if HANDLE is not None:
         if requested != WORKSPACE.resolve():
@@ -540,6 +552,7 @@ def start(workspace=None):
                            ' | ' + _loaded_project() + ' | ' + _loaded_level())
         return
     WORKSPACE = requested
+    WORKER_INSTANCE_ID = uuid.uuid4().hex
     if not callable(getattr(unreal, 'register_slate_post_tick_callback', None)):
         raise RuntimeError('Unreal Editor does not support Python Slate tick callbacks.')
     # Explicit approval to modify a staging Unreal project remains the user's

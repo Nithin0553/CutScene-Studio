@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Cross-runtime AI evidence replay verified using Unreal bundled Python
+
+- Owner supplied successful AI_EVIDENCE_REPLAY_VERIFIED output using actual UE 5.8.3 bundled CPython 3.11.8 executable, after adding isolated D: runtime-dependencies/unreal-python311 to sys.path. Same session 33c2df7eb818ad86a5a6, raw source and analysis hashes, all four artifact hashes, 17 canonical module names, five proposed/five attributed, two unsupported, zero failed/not analyzed, 21 actions, 11 actors, five imports, seven native Cube references and verified setup as prior isolated Studio Python 3.12.10 replay. Execution authorization, engine generation and behavioral fidelity remain false. This verifies bundled interpreter compatibility outside the editor; no embedded-editor proof, native mutations or inference.
+- Next confirm eight verifier regression cases/full suite (last confirmed 812 passes / seven external skips; expected 820 passes if unchanged). Then implement explicit D: dependency bootstrap for embedded worker, read-only native replay/preflight, candidate-bound approval and execution integration, retaining existing gates and no shared model forced unload. Do not treat standalone runtime success as native acceptance. No production code changes in this checkpoint.
+
 ### 2026-11-26 — Unreal bundled Python dependency gap identified
 
 - Owner confirmed UE 5.8.3 bundled Python executable exists, CPython 3.11.8, 64-bit. Isolated -I -B import of jsonschema failed with ModuleNotFoundError; Studio host venv is Python 3.12.10. No Unreal replay yet.

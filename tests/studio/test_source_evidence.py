@@ -297,6 +297,7 @@ def handoff_files(csir, tmp_path, monkeypatch):
         monkeypatch.syspath_prepend(str(root / part))
     import transfer_backend
 
+    csir = copy.deepcopy(csir)
     csir["tracks"] = [csir["tracks"][1]]
     csir["tracks"][0]["name"] = "Prop movement"
     csir["entities"] = [

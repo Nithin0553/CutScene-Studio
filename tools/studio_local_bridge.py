@@ -141,6 +141,7 @@ def worker_connected(folder: Path = WORKSPACE) -> dict[str, Any]:
                 'level': data.get('level'), 'worker_version': data.get('worker'),
                 'worker_source_sha256': data.get('worker_source_sha256'),
                 'checkout_root': data.get('checkout_root'),
+                'worker_instance_id': data.get('worker_instance_id'),
                 'age_seconds': round(age, 1)}
     except (ValueError, TypeError, KeyError, OSError):
         return {'connected': False}
@@ -191,6 +192,107 @@ def companion_upgrade_action(reason: str) -> str:
     return (reason + ' Save the target project, completely close Unreal Editor, '
             'restart Unreal Editor, and start the Python companion from this exact checkout. '
             'Prepare a new transfer candidate after reconnecting.')
+
+
+AI_PREFLIGHT_MAX_AGE_SECONDS = 120
+
+
+def ai_native_preflight_status(folder: Path = WORKSPACE) -> dict[str, Any]:
+    """Check a saved read-only inspection, never authorize or queue work.
+
+    This is a local consistency check, not a substitute for repeating native
+    inspection and immutable replay immediately before future execution.
+    """
+    def blocked(reason: str) -> dict[str, Any]:
+        return {'status': 'AI_NATIVE_PREFLIGHT_REQUIRED', 'verified': False,
+                'execution_authorized': False, 'reason': reason}
+
+    def snapshot(path: Path):
+        raw = path.read_bytes()
+        return json.loads(raw.decode('utf-8-sig')), hashlib.sha256(raw).hexdigest()
+
+    def digest(path: Path):
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    try:
+        active, active_hash = snapshot(folder / 'active-candidate.json')
+        config, config_hash = snapshot(folder / 'connection.json')
+        if not active.get('ai_analysis'):
+            return blocked('Prepare an AI-assisted candidate first.')
+        if config.get('source_rights_confirmed') is not True:
+            return blocked('Confirm source asset-copy rights first.')
+        if (folder / 'active-job.json').exists():
+            return blocked('A job is already active.')
+        worker = worker_connected(folder)
+        if not worker.get('connected'):
+            return blocked('Unreal companion is not connected.')
+        stale = worker_code_mismatch(worker)
+        if stale:
+            return blocked(stale)
+        candidate_id = str(active['candidate_id'])
+        if not candidate_id.isascii() or not candidate_id.replace('_', '').isalnum():
+            return blocked('Invalid active candidate identity.')
+        root = (folder / 'candidates').resolve()
+        candidate = (root / candidate_id).resolve()
+        if candidate.parent != root or candidate != Path(active['candidate_dir']).resolve():
+            return blocked('Active candidate directory differs from the workspace.')
+        report = load_json(folder / 'ai-native-preflight.json')
+        age = (datetime.now(UTC) - datetime.fromisoformat(report['checked_at'])).total_seconds()
+        if (report.get('kind') != 'cutsceneai.studio.ai_native_preflight'
+                or report.get('status') != 'AI_NATIVE_SETUP_PREFLIGHT_PASSED'
+                or not 0 <= age < AI_PREFLIGHT_MAX_AGE_SECONDS
+                or not worker.get('worker_instance_id')
+                or report.get('worker_instance_id') != worker['worker_instance_id']
+                or report.get('worker_source_sha256') != worker['worker_source_sha256']):
+            return blocked('Native inspection expired or belongs to another worker instance.')
+        if any(report.get(flag) is not False for flag in (
+                'execution_authorized', 'engine_generation_executed',
+                'behavioral_fidelity_established')):
+            return blocked('Native inspection is not read-only evidence.')
+        if (report.get('candidate_id') != candidate_id
+                or report.get('candidate_record_sha256') != active_hash
+                or report.get('connection_sha256') != config_hash
+                or report.get('sequence_path') != active['sequence_path']):
+            return blocked('Active connection or candidate changed after inspection.')
+        expected = os.path.normcase(config['target_project'])
+        if (os.path.normcase(str(worker.get('project') or '')) != expected
+                or os.path.normcase(str(report.get('observed_project') or '')) != expected
+                or worker.get('level') != config['level_path']
+                or report.get('observed_level') != config['level_path']):
+            return blocked('Loaded Unreal project or level changed after inspection.')
+        session, session_hash = snapshot(candidate / 'session.json')
+        if (not session.get('ai_analysis')
+                or session_hash != report.get('session_sha256')
+                or session['session_id'] != report.get('session_id')
+                or digest(candidate / 'automatic-setup.json') != report.get('automatic_setup_sha256')):
+            return blocked('Immutable session or automatic setup changed after inspection.')
+        if (session['source']['csir_path'] != config['csir']
+                or session['target']['mapping_path'] != active['mapping_copy']
+                or session['target']['sequence_asset_path'] != active['sequence_path']
+                or os.path.normcase(str(session['target'].get('project_path') or '')) != expected):
+            return blocked('Session no longer matches the selected source or destination.')
+        artifacts = session['artifact_sha256']
+        if set(artifacts) != {'ai-handoff.json', 'coverage-report.json', 'evidence.json',
+                              'transfer-plan.json'} or artifacts != report.get('artifact_sha256'):
+            return blocked('Artifact identity differs from native inspection.')
+        if any(digest(candidate / name) != sha for name, sha in artifacts.items()):
+            return blocked('Prepared artifact changed after native inspection.')
+        inputs = [(session['source']['csir_path'], session['source']['sha256']),
+                  (session['target']['mapping_path'], session['target']['mapping_sha256']),
+                  (session['ai_analysis']['path'], session['ai_analysis']['sha256'])]
+        capture = session.get('source_capture')
+        if (capture['path'] if capture else '') != (config.get('capture') or ''):
+            return blocked('Source capture differs from active connection.')
+        if capture:
+            inputs.append((capture['path'], capture['sha256']))
+        if any(digest(Path(path)) != sha for path, sha in inputs):
+            return blocked('Source, mapping, capture or AI evidence changed after inspection.')
+        if (digest(folder / 'active-candidate.json') != active_hash
+                or digest(folder / 'connection.json') != config_hash):
+            return blocked('Active candidate or connection changed while checking evidence.')
+        return {**report, 'verified': True, 'execution_authorized': False}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError):
+        return blocked('Native inspection unavailable or invalid; inspect the active candidate again.')
 
 
 def destination_readiness(folder: Path = WORKSPACE) -> dict[str, Any]:
@@ -768,6 +870,8 @@ def create_handler(webroot: Path, folder: Path = WORKSPACE):
                 return self.reply(
                     200, studio_ui_features.verification(folder, active, load_json(job_file))
                 )
+            if path == '/api/ai-native-preflight':
+                return self.reply(200, ai_native_preflight_status(folder))
             if path == '/api/status':
                 cfg = folder / 'connection.json'
                 return self.reply(200, {'service': 'CutSceneAI Studio Local Companion',

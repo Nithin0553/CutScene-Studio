@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Installed Unreal runtime located
+
+- Owner confirmed Epic Launcher installation manifest lists UE_5.8, release 5.8.3-58210709, installed on the required D: drive. Old Unreal 4.0 registry entry is not the target runtime.
+- Next check the installed engine's Engine/Binaries/ThirdParty/Python3/Win64/python.exe existence, version, architecture and jsonschema availability, without launching Unreal. If available, replay the preserved expanded candidate using that executable; otherwise isolate compatible dependencies on D: before replay. No installation, editor launch, execution authorization or application code changes at this checkpoint. New targeted regression results still outstanding.
+
 ### 2026-11-26 — Independent expanded candidate replay passed in isolated Studio Python
 
 - Owner supplied verifier JSON: AI_EVIDENCE_REPLAY_VERIFIED, session 33c2df7eb818ad86a5a6, raw source SHA256 9639d6410ca16bd2f0c18ed44ae9cb1fee77699caf6bfb53992365d426368e7b, analysis SHA256 dd8ac47d3c39619528bde770ad08960b2881f629b3c5ab63c6f3c7dc2f5b9b01; four artifact hashes verified, five proposed/five attributed, two unsupported, zero failed/not analyzed, 21 actions, automatic setup verified with 11 actors/five imports/seven native Cube references. All execution and fidelity flags false. 17 canonical module names reported; Python 3.12.10 in existing D: .venv-studio under isolated -I -B command. No native editor interpreter tested yet.

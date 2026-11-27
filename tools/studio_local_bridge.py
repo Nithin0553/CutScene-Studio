@@ -275,6 +275,37 @@ def review_flags(config: dict[str, Any], action_counts: dict[str, int]) -> list[
     return flags
 
 
+def _analyze_source(csir: Path, report_path: Path) -> dict[str, Any]:
+    """Run the single local agent and preserve its advisory source evidence."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from jsonschema import ValidationError
+
+    from packages.studio.mapping_resources import MappingResources
+    from packages.studio.ollama_provider import OllamaProvider
+    from packages.studio.source_evidence import SourceEvidence
+    from packages.studio.transfer_agent import TransferAgent
+
+    try:
+        source = SourceEvidence(load_json(csir), MappingResources())
+    except ValidationError as exc:
+        raise ValueError('Source CSIR failed AI schema validation.') from exc
+    provider = OllamaProvider()
+    if provider.model not in provider.models():
+        raise ValueError('Required local Ollama model is unavailable: ' + provider.model)
+    # One graph and one provider for the scene. Shared Ollama instances use
+    # the existing bounded idle keep-alive; do not forcibly unload other users' models.
+    report = source.analyze_scene(TransferAgent(provider))
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    with report_path.open('x', encoding='utf-8', newline='\n') as handle:
+        json.dump(report, handle, indent=2, allow_nan=False)
+    counts = report['decision_counts']
+    if report['provider_failed'] or counts['failed'] or counts['not_analyzed']:
+        raise ValueError('AI source analysis requires review; no candidate prepared. '
+                         'Report: ' + str(report_path))
+    return report
+
+
 def prepare(folder: Path = WORKSPACE, options: dict[str, Any] | None = None) -> dict[str, Any]:
     """Call the existing, source-authenticated transfer backend; never overwrite."""
     config = load_json(folder / 'connection.json')
@@ -282,7 +313,11 @@ def prepare(folder: Path = WORKSPACE, options: dict[str, Any] | None = None) -> 
     if str(ROOT / 'tools') not in sys.path:
         sys.path.insert(0, str(ROOT / 'tools'))
     import studio_ui_features
-    overrides = studio_ui_features.validate_options(config, options or {})
+    request = dict(options or {})
+    ai_enabled = request.pop('enable_ai_agent', False)
+    if not isinstance(ai_enabled, bool):
+        raise ValueError('enable_ai_agent must be Boolean.')
+    overrides = studio_ui_features.validate_options(config, request)
     active_job = folder / 'active-job.json'
     if active_job.is_file():
         prior = job_status(load_json(active_job)['job_id'], folder)
@@ -297,6 +332,12 @@ def prepare(folder: Path = WORKSPACE, options: dict[str, Any] | None = None) -> 
     candidate_dir = folder / 'candidates' / candidate_id
     old_sequence = config['base_sequence']
     new_sequence = old_sequence + '_STUDIO_' + candidate_id[-8:].upper()
+    analysis_path = None
+    analysis_report = None
+    if ai_enabled:
+        analysis_path = candidate_dir.with_suffix('.source-analysis.json')
+        analysis_report = _analyze_source(Path(config['csir']), analysis_path)
+    ai_options = {'analysis_path': analysis_path} if analysis_path is not None else {}
     if config.get('capture'):
         extra = {'transfer_options': overrides} if overrides else {}
         mapping_copy, session = prepare_candidate(
@@ -304,7 +345,7 @@ def prepare(folder: Path = WORKSPACE, options: dict[str, Any] | None = None) -> 
             new_sequence, candidate_dir,
             skeletal_root_world_lock=config['skeletal_root_world_lock'],
             hierarchy_transfer=bool(config.get('unity_project')),
-            **extra,
+            **extra, **ai_options,
         )
     else:
         # The existing immutable backend supports source-only preparation.
@@ -330,7 +371,7 @@ def prepare(folder: Path = WORKSPACE, options: dict[str, Any] | None = None) -> 
             json.dump(original, handle, indent=2)
         session = prepared_transfer.prepare(
             config['csir'], mapping_copy, candidate_dir,
-            target_project=config['target_project'],
+            target_project=config['target_project'], **ai_options,
         )
     plan = load_json(candidate_dir / 'transfer-plan.json')
     coverage = load_json(candidate_dir / 'coverage-report.json') if (
@@ -401,6 +442,17 @@ def prepare(folder: Path = WORKSPACE, options: dict[str, Any] | None = None) -> 
             'engine_generation_executed': False,
             'behavioral_fidelity_established': False, 'source_capture_available': bool(config.get('capture')),
             'action_counts': action_counts, 'action_total': len(actions)}
+    if analysis_report is not None:
+        import prepared_transfer
+        if prepared_transfer.verify(candidate_dir) != session:
+            raise ValueError('AI candidate verification differs.')
+        info['ai_analysis'] = {
+            'status': 'PREPARED_ADVISORY',
+            'decision_counts': analysis_report['decision_counts'],
+            'active_ced_alerts': analysis_report['ced_preflight']['active_alert_count'],
+            'execution_enabled': False,
+            'reason': 'Native AI verifier integration is pending; preparation only.',
+        }
     atomic_json(folder / 'active-candidate.json', info)
     (folder / 'destination-readiness.json').unlink(missing_ok=True)
     (folder / 'active-job.json').unlink(missing_ok=True)
@@ -424,6 +476,8 @@ def approve_one_click(candidate_id: str, folder: Path = WORKSPACE) -> dict[str, 
         not candidate_id.isascii() or
         not candidate_id.replace('_', '').isalnum()):
         raise ValueError('Approval candidate identity is stale or invalid.')
+    if current.get('ai_analysis') is not None:
+        raise ValueError('AI candidate preparation only; native execution is not enabled.')
     if not config.get('source_rights_confirmed'):
         raise ValueError('Source asset-copy rights must be confirmed.')
     # Approval records intent only. A verified existing target is also valid;
@@ -454,6 +508,8 @@ def queue_trial(candidate_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
             sys.path.insert(0, str(p))
     import prepared_transfer
     session = prepared_transfer.verify(candidate_dir)
+    if session.get('ai_analysis') is not None:
+        raise ValueError('AI candidate preparation only; native execution is not enabled.')
     config = load_json(folder / 'connection.json')
     config_check(config)
     if session['source']['csir_path'] != config['csir']:

@@ -83,6 +83,12 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Fresh-map regression passed; Ruff exception correction
+
+- Owner confirmed ordered targeted Python suite at 529a4ae: 217 passed in 125.71 s. Node syntax check and all 22 UI scenarios passed. Ruff identified three TRY004 diagnostics in integrations/unreal/studio_ai_native_preflight.py (invalid dirty-state type, noncallable level creation API, noncallable namespace inspection API).
+- Corrected exception types to TypeError for the three diagnostics and adjusted the missing creation API test to require TypeError specifically. Dirty-state errors remain wrapped in the same RuntimeError; the worker still catches all native execution exceptions and the host handles TypeError. No authorization, map creation, evidence or conversion behavior weakened. PR #1 remains draft.
+- Correction not executed remotely. Rerun Ruff and targeted native preflight/worker tests; no need to rerun unchanged UI solely for this lint correction. Latest complete Python suite remains 822 passed/seven external skips; 217 is the confirmed targeted run before this correction. Next milestone after verification: safe Ollama model memory lifecycle before native reconstruction, then remaining adapters and bounded CineTwin repair. Keep engines and Ollama closed during software regression; no native execution or fidelity claim.
+
 ### 2026-11-26 — Authorization regressions passed; fresh-map integration
 
 - Owner reported all checks passed after 7f6a430 (expected 193 Python passes, 21 Node scenarios and Ruff); exact new counts/timings not separately supplied. Last full-suite baseline remains 822 passed/seven external skips. PR #1 open draft.

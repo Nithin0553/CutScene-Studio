@@ -47,7 +47,7 @@ def preflight_new_level(api, *, expected_project, expected_level, observed_level
         else:
             dirty = world.get_outermost().is_dirty()
             if not isinstance(dirty, bool):
-                raise ValueError('Unknown world dirty state.')
+                raise TypeError('Unknown world dirty state.')
     except Exception as exc:
         raise RuntimeError("Cannot confirm current Unreal map is saved.") from exc
     if dirty:
@@ -58,7 +58,7 @@ def preflight_new_level(api, *, expected_project, expected_level, observed_level
     if not callable(creator):
         creator = getattr(getattr(api, 'EditorLevelLibrary', None), 'new_level', None)
     if not callable(creator) or not callable(getattr(api.EditorAssetLibrary, 'make_directory', None)):
-        raise RuntimeError("Unreal level creation API unavailable; save an empty map manually.")
+        raise TypeError("Unreal level creation API unavailable; save an empty map manually.")
     return {'current_world_clean': True, 'target_map_absent': True,
             'level_creation_api_available': True}
 
@@ -113,7 +113,7 @@ def inspect_candidate(
                                     expected_level=expected_level, observed_level=observed_level)
                  if create_level else None)
     if not callable(getattr(registry, "does_directory_exist", None)):
-        raise RuntimeError("Unreal namespace inspection API unavailable.")
+        raise TypeError("Unreal namespace inspection API unavailable.")
     if registry.does_directory_exist(setup["target_folder"]):
         raise ValueError("Automatic setup target namespace already exists.")
     sequence = target["sequence_asset_path"]

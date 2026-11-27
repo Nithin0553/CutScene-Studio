@@ -626,7 +626,8 @@ def test_read_only_ai_native_setup_preflight(tmp_path, monkeypatch, case):
             'new_wrong_path': 'noncanonical',
             'new_missing_api': 'level creation API unavailable',
         }[case]
-        with pytest.raises((ValueError, RuntimeError, scene.AutomaticSetupError), match=expected):
+        error_type = TypeError if case == 'new_missing_api' else (ValueError, RuntimeError, scene.AutomaticSetupError)
+        with pytest.raises(error_type, match=expected):
             preflight.inspect_candidate(candidate, **kwargs)
     assert calls == ([] if case == 'unbound_project' else [candidate])
     assert {p: p.read_bytes() for p in candidate.iterdir()} == before

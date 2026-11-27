@@ -464,6 +464,21 @@ def review_flags(config: dict[str, Any], action_counts: dict[str, int]) -> list[
     return flags
 
 
+def ai_model_memory_status() -> dict[str, Any]:
+    """Inspect the same local service used by Studio inference; no model calls."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from packages.studio.ollama_provider import OllamaProvider
+
+    return OllamaProvider(timeout=2).memory_status()
+
+
+def _require_ai_model_memory_ready() -> None:
+    status = ai_model_memory_status()
+    if status.get('ready') is not True:
+        raise ValueError(str(status.get('reason') or 'Ollama model memory status is unavailable.'))
+
+
 def _analyze_source(csir: Path, report_path: Path) -> dict[str, Any]:
     """Run the single local agent and preserve its advisory source evidence."""
     if str(ROOT) not in sys.path:
@@ -774,6 +789,7 @@ def queue_trial(candidate_id: str, folder: Path = WORKSPACE, *, approval_id: str
             folder, candidate_id, heartbeat.get('worker_instance_id'),
             heartbeat.get('worker_source_sha256'), approval_id)
         ai_authorization = {'approval_id': approval_id, 'approval_sha256': approval_hash}
+        _require_ai_model_memory_ready()
     readiness = destination_readiness(folder)
     candidate_record = folder / 'active-candidate.json'
     auto = load_json(candidate_record).get('automatic_setup') if candidate_record.is_file() else {}
@@ -819,6 +835,9 @@ def queue_trial(candidate_id: str, folder: Path = WORKSPACE, *, approval_id: str
            'created_at': datetime.now(UTC).isoformat(),
            'generation_status': 'NOT_STARTED', 'fidelity_verified': False}
     if ai:
+        # Repeat the resource gate before publishing, then verify authorization
+        # freshness again after the bounded local status request.
+        _require_ai_model_memory_ready()
         # Repeat the authorization after potentially expensive source manifest verification.
         current_hash, _, _, _ = auth.validate(
             folder, candidate_id, heartbeat.get('worker_instance_id'),
@@ -1019,6 +1038,8 @@ def create_handler(webroot: Path, folder: Path = WORKSPACE):
                 return self.reply(
                     200, studio_ui_features.verification(folder, active, load_json(job_file))
                 )
+            if path == '/api/ai-model-memory':
+                return self.reply(200, ai_model_memory_status())
             if path == '/api/ai-native-preflight':
                 with LOCK:
                     return self.reply(200, ai_native_preflight_status(folder))

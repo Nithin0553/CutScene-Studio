@@ -141,3 +141,45 @@ def test_transport_failure_preserves_exception_category(transport, error):
     with pytest.raises(op.OllamaError, match=type(error).__name__):
         op.OllamaProvider().generate("Select a mapping", SCHEMA)
     assert transport[2] == [True]
+
+
+@pytest.mark.parametrize("payload,expected", [
+    ({"models": []}, "NO_RESIDENT_MODELS"),
+    ({"models": [{"name": "qwen2.5:7b-instruct"}]}, "MODELS_RESIDENT"),
+    ({"models": [{"model": "other:latest"}]}, "MODELS_RESIDENT"),
+    ({"models": [None]}, "MEMORY_STATUS_UNKNOWN"),
+    ({"models": [{}]}, "MEMORY_STATUS_UNKNOWN"),
+    ({"models": "invalid"}, "MEMORY_STATUS_UNKNOWN"),
+    ({}, "MEMORY_STATUS_UNKNOWN"),
+])
+def test_model_memory_status_is_read_only(transport, payload, expected):
+    transport[1].append(reply(payload))
+    status = op.OllamaProvider(timeout=2).memory_status()
+    assert status["status"] == expected
+    assert status["ready"] is (expected == "NO_RESIDENT_MODELS")
+    assert len(transport[0]) == 1
+    assert transport[0][0][3:6] == ("GET", "/api/ps", None)
+    assert transport[2] == [True]
+
+
+@pytest.mark.parametrize("error,expected,ready", [
+    (ConnectionRefusedError("offline"), "SERVICE_OFFLINE", True),
+    (TimeoutError("timeout"), "MEMORY_STATUS_UNKNOWN", False),
+    (OSError("other"), "MEMORY_STATUS_UNKNOWN", False),
+])
+def test_model_memory_status_distinguishes_closed_service_from_unknown(
+    transport, error, expected, ready,
+):
+    transport[1].append(error)
+    result = op.OllamaProvider(timeout=2).memory_status()
+    assert result["status"] == expected
+    assert result["ready"] is ready
+    assert len(transport[0]) == 1
+    assert transport[0][0][3:6] == ("GET", "/api/ps", None)
+    assert transport[2] == [True]
+
+
+def test_model_memory_http_error_is_not_idle(transport):
+    transport[1].append(reply({"error": "unavailable"}, 503))
+    assert op.OllamaProvider().memory_status()["ready"] is False
+    assert len(transport[0]) == 1

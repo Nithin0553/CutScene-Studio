@@ -83,6 +83,13 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Fresh-map lint confirmed; Ollama memory lifecycle gate
+
+- Owner confirmed all narrow Ruff and affected native preflight/worker tests passed after f473ea9; exact narrow test count not supplied. Most recent ordered suite remains 217 passes in 125.71 s and 22 Node scenarios. PR #1 open draft.
+- Keep the existing 2m idle keep-alive for warm scene analysis. Added provider running_models()/memory_status() using documented read-only GET /api/ps (https://docs.ollama.com/api/ps); no forced unload, model pulls or process termination on the shared service. Strictly validate response; no resident models or a refused loopback connection permit queueing, malformed/timeout/HTTP errors and any resident model block it. Offline means endpoint not listening, not measured VRAM/RAM. This is a conservative resource readiness policy at host queue time, not a memory reservation or protection against other clients reloading later. Saved candidate replay/worker remains independent of Ollama.
+- Added bounded 2-second memory status endpoint and UI polling/status; require readiness before explicit AI authorization button and check again twice in host queue (before manifest verification and before publication). Deterministic transfer unchanged; no changes to immutable evidence or native authorization. No new dependencies, architecture, caches or model downloads.
+- Added 11 mocked provider cases, six localhost gate cases (including reload during queue) and one UI scenario. Expected ordered suite with provider added 251 passes if unchanged (217 + 6 + 28 provider cases); Node 23. New software tests not run remotely. Verify targeted provider/host/source evidence/worker regression and Ruff with engines/Ollama closed. After passing, audit remaining cinematic feature adapters and bounded CineTwin repair; native execution/fidelity still unverified.
+
 ### 2026-11-26 — Fresh-map regression passed; Ruff exception correction
 
 - Owner confirmed ordered targeted Python suite at 529a4ae: 217 passed in 125.71 s. Node syntax check and all 22 UI scenarios passed. Ruff identified three TRY004 diagnostics in integrations/unreal/studio_ai_native_preflight.py (invalid dirty-state type, noncallable level creation API, noncallable namespace inspection API).

@@ -951,6 +951,8 @@ def ai_execution_fixture(service, monkeypatch, request):
         return {'ready': True}
 
     monkeypatch.setattr(studio_auto_assets, 'verify', verify_manifest)
+    monkeypatch.setattr(bridge, 'ai_model_memory_status', lambda: {
+        'status': 'NO_RESIDENT_MODELS', 'ready': True, 'running_models': []})
     monkeypatch.setattr(bridge, 'destination_readiness',
                         lambda _: {'status': 'NEW_LEVEL_REQUIRED' if new_map else 'SCENE_SETUP_REQUIRED',
                                    'ready': False})
@@ -1254,3 +1256,42 @@ def test_new_map_worker_claim_requires_matching_fresh_probe(ai_execution_fixture
             worker._verify_and_claim_ai_execution(job, f.candidate.resolve())
         assert not claim.exists()
     assert job['generation_status'] == 'NOT_STARTED'
+
+
+@pytest.mark.parametrize('case', ['idle', 'offline', 'resident', 'unknown', 'reloaded'])
+def test_ai_queue_checks_model_memory_before_publishing(ai_execution_fixture, monkeypatch, case):
+    f = ai_execution_fixture
+    approval_id = _approve_fixture(f)
+    calls = []
+
+    def memory():
+        calls.append(True)
+        state = {
+            'idle': 'NO_RESIDENT_MODELS', 'offline': 'SERVICE_OFFLINE',
+            'resident': 'MODELS_RESIDENT', 'unknown': 'MEMORY_STATUS_UNKNOWN',
+            'reloaded': 'NO_RESIDENT_MODELS' if len(calls) == 1 else 'MODELS_RESIDENT',
+        }[case]
+        return {'status': state, 'ready': state in {'NO_RESIDENT_MODELS', 'SERVICE_OFFLINE'},
+                'reason': 'Ollama memory not ready.'}
+
+    monkeypatch.setattr(bridge, 'ai_model_memory_status', memory)
+    status, result = _queue_fixture(f, approval_id)
+    if case in {'idle', 'offline'}:
+        assert status == 200, result
+        assert len(calls) == 2
+        assert (f.work / 'active-job.json').exists()
+    else:
+        assert status == 422 and 'Ollama memory not ready' in result['error']
+        assert not (f.work / 'active-job.json').exists()
+        assert not list((f.work / 'jobs').glob('*.json'))
+        assert len(calls) == (2 if case == 'reloaded' else 1)
+
+
+def test_ai_model_memory_status_endpoint_is_read_only(ai_execution_fixture):
+    f = ai_execution_fixture
+    status, result = call(f.base + '/api/ai-model-memory')
+    assert status == 200
+    assert result['status'] == 'NO_RESIDENT_MODELS'
+    assert result['ready'] is True
+    assert not (f.work / f.auth.APPROVAL_FILE).exists()
+    assert not (f.work / 'active-job.json').exists()

@@ -8,7 +8,7 @@ const css = fs.readFileSync('apps/studio-web/cinematic.css', 'utf8');
 
 function boot({editorReady = true, censusUnresolved = false, multiSources = false,
   restoredJob = '', restoredPending = false, restoredAI = false, aiFailure = false,
-  missingAI = false, approvalFails = false, newMap = false} = {}) {
+  missingAI = false, approvalFails = false, newMap = false, memoryBlocked = false} = {}) {
   const listeners = {}, calls = [], requests = [];
   let html = '', writes = 0, copied = '';
   const app = {
@@ -86,6 +86,9 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
           destination_readiness: candidate && editorReady ?
             {status: newMap?'NEW_LEVEL_REQUIRED':'READY', ready:!newMap, candidate_id:candidate.candidate_id} :
             {status: 'WAITING_FOR_UNREAL', ready:false, next_action:'Open Unreal Editor'}};
+      } else if (url === '/api/ai-model-memory') {
+        result=memoryBlocked?{status:'MODELS_RESIDENT',ready:false,running_models:['fixture-model'],reason:'Ollama models remain loaded.'}:
+          {status:'NO_RESIDENT_MODELS',ready:true,running_models:[],reason:'Ollama reports no resident models.'};
       } else if (url === '/api/ai-native-preflight') {
         if(opts.method==='POST'){
           assert.equal(body.candidate_id,candidate.candidate_id);
@@ -651,7 +654,22 @@ async function testNewMapRequiresExplicitCreationApproval(){
   assert.equal(x.calls.filter(r=>r==='/api/execute').length,1);
 }
 
+async function testResidentModelBlocksAuthorization(){
+  const x=boot({restoredAI:true,memoryBlocked:true});
+  await x.pause();
+  await x.pause();
+  await x.click('view-ai-plan');
+  await x.click('inspect-ai-target');
+  await x.poll();
+  assert.match(x.app.innerHTML,/Ollama models remain loaded/);
+  assert.match(x.app.innerHTML,/fixture-model/);
+  assert.doesNotMatch(x.app.innerHTML,/Authorize and transfer/);
+  await x.click('authorize-ai-transfer');
+  assertNoNativeCalls(x);
+}
+
 (async()=>{
+  await testResidentModelBlocksAuthorization();
   await testNewMapRequiresExplicitCreationApproval();
   await testExplicitAIApprovalQueuesOnlyOnce();
   await testAIApprovalFailureNeverQueues();
@@ -674,5 +692,5 @@ async function testNewMapRequiresExplicitCreationApproval(){
   await testStrictCensusBlockAndExplicitRecovery();
   await testManualCSIRAndCensus();
   await testMissingSelectedCensusFailsClosed();
-  console.log('Cinematic UI backend contract: 22 scenarios including explicit fresh-map approval, AI approval, read-only AI inspection, AI preparation-only, failure recovery, native errors and Home-first startup passed.');
+  console.log('Cinematic UI backend contract: 23 scenarios including model memory readiness, fresh-map approval, AI approval, read-only AI inspection, AI preparation-only, failure recovery, native errors and Home-first startup passed.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

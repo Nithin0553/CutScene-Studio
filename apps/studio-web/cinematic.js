@@ -9,7 +9,7 @@
   const state = {screen:'home', phase:'IDLE', busy:false, info:'', error:'', status:null,
     discovery:null, folders:{unity:'',unreal:''}, unrealProject:'', csir:'', level:'',
     sourceRights:false, allowPartial:false, enableAI:false, candidate:null, job:null, verification:null,
-    diagnosis:null, feedback:null, aiPreflight:null, running:false, detailsOpen:false, menuOpen:false,
+    diagnosis:null, feedback:null, aiPreflight:null, aiMemory:null, running:false, detailsOpen:false, menuOpen:false,
     censusOptions:[], censusPath:'', censusSelection:null, censusIssue:false, editorHelpOpen:false};
   const pathRoot = () => String(state.status?.repo_root||'').replaceAll('\\','/');
   const workerCommand = () => {
@@ -22,6 +22,7 @@
   const readiness = () => state.status?.destination_readiness || {};
   const aiCandidate = () => Boolean(state.candidate?.ai_analysis);
   const canAuthorizeAI = () => Boolean(aiCandidate() && !state.job && validEditor() &&
+    state.aiMemory?.ready === true &&
     state.aiPreflight?.verified === true && state.aiPreflight?.request_id &&
     state.aiPreflight?.report_sha256 && state.aiPreflight?.candidate_id === state.candidate.candidate_id &&
     state.candidate.automatic_setup?.ready &&
@@ -221,6 +222,9 @@
       resultRow('Planned actions',state.candidate.action_total??'Not reported')+
       resultRow('Active source CED alerts',a.active_ced_alerts??'Not reported')+
       '<p class="subnote">'+esc(a.reason||'Native execution is not enabled.')+' No native changes performed. Fidelity remains unverified.</p>'+
+      '<h3>Ollama memory readiness</h3>'+
+      '<p class="subnote">'+esc(state.aiMemory?.reason||'Checking local model memory readiness…')+'</p>'+
+      (state.aiMemory?.running_models?.length?'<p class="subnote">Resident models: '+esc(state.aiMemory.running_models.join(', '))+'</p>':'')+
       '<h3>Read-only Unreal inspection</h3>'+
        '<p class="subnote">'+esc(state.aiPreflight?.verified?'Native setup inspection passed. Import readback and execution approval remain pending.':state.aiPreflight?.reason||'Connect the selected staging level to inspect the candidate.')+'</p>'+
        button('Inspect target (read-only)','inspect-ai-target',state.busy||!validEditor()||!state.candidate.automatic_setup?.ready||state.aiPreflight?.status==='AI_NATIVE_PREFLIGHT_REQUESTED','secondary')+
@@ -428,8 +432,9 @@
     const s=await api('status');state.status=s;
     if(!state.running)state.candidate=s.candidate||null;
     if(aiCandidate()&&state.screen==='transfer'){
+      try{state.aiMemory=await api('ai-model-memory');}catch{state.aiMemory=null;}
       try{state.aiPreflight=await api('ai-native-preflight');}catch{state.aiPreflight=null;}
-    }else state.aiPreflight=null;
+    }else{state.aiPreflight=null;state.aiMemory=null;}
     if(s.active_job)state.job=await api('jobs/'+s.active_job);
     if(terminal(state.job)){
       state.phase=generated()?'COMPLETE':'BLOCKED';
@@ -467,6 +472,7 @@
     state.candidate=await api('prepare',opts);
     if(opts.enable_ai_agent&&!aiCandidate())throw Error('AI evidence missing from prepared candidate. No execution requested.');
     if(aiCandidate()){
+      state.aiMemory=null;state.aiPreflight=null;
       state.phase='AI_PREPARED';state.running=false;state.error='';state.info='';render();return;
     }
     // An existing, independently ready Unreal level may not require imports.
@@ -607,7 +613,7 @@
         if(!approval.approved||!approval.approval_id)throw Error('Native execution approval missing.');
         state.job=await api('execute',{candidate_id,approval_id:approval.approval_id});
         state.running=true;state.phase='RUNNING';state.info='';
-      }catch(e){state.error=e.message;state.running=false;state.aiPreflight=null;}
+      }catch(e){state.error=e.message;state.running=false;state.aiPreflight=null;state.aiMemory=null;}
       finally{state.busy=false;render();}
       return;
     }

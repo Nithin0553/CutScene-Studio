@@ -104,6 +104,42 @@ class OllamaProvider:
             if isinstance(item, dict) and isinstance(item.get("name"), str)
         )
 
+    def running_models(self) -> tuple[str, ...]:
+        """Inspect resident models without generating, loading or unloading."""
+        payload = self._request("GET", "/api/ps")
+        models = payload.get("models")
+        if not isinstance(models, list):
+            raise OllamaError("Invalid running model listing")
+        names = []
+        for item in models:
+            if not isinstance(item, dict):
+                raise OllamaError("Invalid running model entry")
+            name = item.get("name") or item.get("model")
+            if not isinstance(name, str) or not name.strip():
+                raise OllamaError("Invalid running model identity")
+            names.append(name)
+        return tuple(sorted(set(names)))
+
+    def memory_status(self) -> dict[str, Any]:
+        """Fail closed on ambiguous responses, never unload shared models.
+
+        A refused connection means this endpoint is not listening, not proof
+        that all system/GPU memory is free. Evidence replay needs no server.
+        """
+        try:
+            running = self.running_models()
+        except OllamaError as exc:
+            if isinstance(exc.__cause__, ConnectionRefusedError):
+                return {"status": "SERVICE_OFFLINE", "ready": True, "running_models": [],
+                        "reason": "Local Ollama is not listening; model memory was not measured."}
+            return {"status": "MEMORY_STATUS_UNKNOWN", "ready": False, "running_models": [],
+                    "reason": "Cannot inspect local Ollama model residency. Retry or close Ollama safely."}
+        if running:
+            return {"status": "MODELS_RESIDENT", "ready": False, "running_models": list(running),
+                    "reason": "Ollama models remain loaded. Wait for idle expiry or close Ollama when safe."}
+        return {"status": "NO_RESIDENT_MODELS", "ready": True, "running_models": [],
+                "reason": "Ollama reports no resident models."}
+
     def generate(self, prompt: str, schema: dict[str, Any]) -> InferenceResult:
         if not prompt.strip() or len(prompt) > 64000:
             raise ValueError("Prompt is empty or exceeds the character limit")
@@ -147,7 +183,7 @@ class OllamaProvider:
         )
 
     def unload(self) -> None:
-        """Release model memory after a transfer session (shared Ollama instance)."""
+        """Explicit unload for a caller that owns the model session exclusively."""
         payload = self._request(
             "POST", "/api/generate",
             {"model": self.model, "stream": False, "keep_alive": 0},

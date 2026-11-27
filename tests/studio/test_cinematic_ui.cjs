@@ -522,7 +522,19 @@ async function testRestoredAIPlanNeverAutoQueues(){
   await x.change('census',x.censusB);
   await x.click('start-fresh');
   assert.equal(x.requests.find(r=>r.url==='/api/prepare').body.enable_ai_agent,false);
-  assert.equal(x.calls.filter(r=>r==='/api/execute').length,1);
+  assert.equal(x.calls.filter(r=>r==='/api/connect-projects').length,1);
+  assert.equal(x.calls.filter(r=>r==='/api/prepare').length,1);
+  assert.equal(x.calls.filter(r=>r==='/api/approve-one-click').length,1);
+  // Preparation holds the busy flag; the next status poll advances the
+  // explicitly approved fresh deterministic candidate after readiness checks.
+  await x.poll();
+  const executions=x.requests.filter(r=>r.url==='/api/execute');
+  assert.equal(executions.length,1);
+  assert.equal(executions[0].body.candidate_id,'candidate001');
+  assert.ok(x.calls.indexOf('/api/approve-one-click')<x.calls.indexOf('/api/execute'));
+  await x.poll();
+  assert.equal(x.calls.filter(r=>r==='/api/execute').length,1,
+    'polling must not replay the newly submitted candidate');
 }
 
 async function testAIErrorNeverFallsBack(){

@@ -436,24 +436,42 @@ def compare(
                         int(match.get("post_roll_frames", -1)),
                         "Skeletal final-pose hold duration must match.",
                     )
-                    play_rate_error = abs(
-                        float(exp_track.get("play_rate", 1.0))
-                        - float(match.get("play_rate", 1.0))
-                    )
+                    actual_rate = match.get("play_rate")
+                    known_rate = (type(actual_rate) in (int, float)
+                                  and math.isfinite(actual_rate) and actual_rate > 0)
+                    expected_rate = float(exp_track.get("play_rate", 1.0))
+                    play_rate_error = abs(expected_rate - actual_rate) if known_rate else None
                     _check(
                         checks,
                         f"animation.play_rate.{name}",
                         "ANIMATION",
-                        _status_from_bool(play_rate_error <= 1e-6),
-                        float(exp_track.get("play_rate", 1.0)),
-                        float(match.get("play_rate", 1.0)),
-                        "Skeletal animation playback rate must match.",
+                        ("INCOMPLETE" if play_rate_error is None else
+                         _status_from_bool(play_rate_error <= 1e-6)),
+                        expected_rate,
+                        actual_rate,
+                        "Skeletal animation playback rate must be independently measured.",
                         error=play_rate_error,
                     )
+                    if "required_source_end_seconds" in exp_track:
+                        length = match.get("imported_duration_seconds")
+                        required_end = float(exp_track["required_source_end_seconds"])
+                        tolerance = float(exp_track["duration_tolerance_seconds"])
+                        start = float(exp_track.get("source_offset_seconds", 0.0))
+                        known_length = (type(length) in (int, float)
+                                        and math.isfinite(length) and length > 0)
+                        _check(
+                            checks, f"animation.imported_duration.{name}", "TIMING",
+                            ("INCOMPLETE" if not known_length else
+                             _status_from_bool(start < length and required_end <= length + tolerance)),
+                            {"source_start_seconds": start, "required_end_seconds": required_end,
+                             "tolerance_seconds": tolerance}, length,
+                            "Imported clip must cover the source interval without unsupported looping.",
+                        )
 
                 if match is not None:
                     for metric, threshold, domain in (
                         ("source_offset_seconds", 0.0001, "TIMING"),
+                        ("asset_rate_scale", 0.000001, "TIMING"),
                         ("ease_in_frames", 0.0, "ANIMATION"),
                         ("ease_out_frames", 0.0, "ANIMATION"),
                     ):

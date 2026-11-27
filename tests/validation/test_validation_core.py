@@ -542,3 +542,34 @@ def test_bounded_light_intensity_sections_require_independent_range_readback(cas
                 else "light.intensity_sections.LIGHT_KEY")
     row = next(item for item in result["checks"] if item["id"] == check_id)
     assert row["status"] == status
+
+
+@pytest.mark.parametrize("case,metric,status", [
+    ("no_rate", "play_rate", "INCOMPLETE"),
+    ("wrong_rate", "play_rate", "FAIL"),
+    ("no_duration", "imported_duration", "INCOMPLETE"),
+    ("short_duration", "imported_duration", "FAIL"),
+    ("valid", "imported_duration", "PASS"),
+    ("asset_rate", "asset_rate_scale", "FAIL"),
+])
+def test_skeletal_native_duration_and_rate_are_independent_validation_gates(case, metric, status):
+    expected = _snapshot()
+    track = expected["bindings"][1]["tracks"][0]
+    track.update(required_source_end_seconds=3.25, duration_tolerance_seconds=1 / 60,
+                 asset_rate_scale=1.0, source_offset_seconds=0.0)
+    actual = copy.deepcopy(expected)
+    observed = actual["bindings"][1]["tracks"][0]
+    observed["imported_duration_seconds"] = 4.0
+    if case == "no_rate":
+        observed["play_rate"] = None
+    elif case == "wrong_rate":
+        observed["play_rate"] = 2.0
+    elif case == "no_duration":
+        observed["imported_duration_seconds"] = None
+    elif case == "short_duration":
+        observed["imported_duration_seconds"] = 2.0
+    elif case == "asset_rate":
+        observed["asset_rate_scale"] = 0.5
+    report = core.compare(expected, actual)
+    row = next(item for item in report["checks"] if item["id"] == f"animation.{metric}.CHARACTER_Guard")
+    assert row["status"] == status

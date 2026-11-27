@@ -349,3 +349,19 @@ def test_light_multiple_source_tracks_cannot_write_same_target_intensity():
     doc["tracks"].append(dict(doc["tracks"][0]))
     with pytest.raises(csir_plan.PlanError, match="Multiple light intensity writers"):
         csir_plan.build_plan(doc, mapped())
+
+
+@pytest.mark.parametrize("update", [
+    {"time_scale": 0}, {"time_scale": float("nan")}, {"source_offset": rt(-1)},
+    {"end": rt(0)}, {"end": rt(0.001)}, {"loop": True},
+])
+def test_skeletal_invalid_or_unmapped_source_timing_is_rejected(update):
+    doc = document([])
+    doc["entities"][0]["ced_type"] = "entity.character"
+    doc["assets"] = [{"asset_id": "clip", "name": "walk"}]
+    sec = section(0, 1, [])
+    sec["payload"]["asset_id"] = "clip"
+    sec.update(update)
+    doc["tracks"][0]["sections"] = [sec]
+    with pytest.raises(csir_plan.PlanError):
+        csir_plan.build_plan(doc, {**mapped(), "assets": {"walk": "/Game/Walk"}})

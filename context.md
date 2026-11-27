@@ -83,6 +83,13 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-27 — Rig identity regression passed; imported skeletal timing gate
+
+- Owner confirmed all checks passed at 336965f (exact count not supplied). Previous explicit 224 conversion and 252 host/provider counts, Node 23. PR #1 open draft.
+- Added source timing checks for finite positive skeletal clip interval/rate, nonnegative offset and nonzero quantized duration. Explicit loop=true is unsupported. Unity extractor currently does not preserve AnimationPlayableAsset looping/extrapolation fully; cannot infer nonlooping semantics from its legacy false flag. Native builder verifies actual imported animation duration and unit asset rate_scale before root motion sampling/generation. Duration check permits up to one source-scaled display frame for independent endpoint rounding, never accepts start outside asset. No silent duration stretching, looping or retargeting. Uses documented AnimSequence sequence_length and rate_scale readback; no source asset mutation.
+- Independent readback no longer substitutes 1.0 or zero for missing skeletal play rate/trim; imported duration and asset rate scale measured from native asset. Validation requires independently observed source trim (including zero), playback rate and imported duration coverage for new expectations. Root sampling requires observed rate and trim. Missing evidence is INCOMPLETE; wrong observed values FAIL. This does not establish loop, extrapolation, additive animation, per-bone or runtime timing fidelity. Native timing API behavior remains unverified. Canonical timing helper reload included.
+- Added 25 tests (13 pure/mock timing, six planner, six validation); not run remotely. Run affected conversion/validation suite plus new timing test and planner-sync/builder contracts. Ruff on new helper and previously clean planner/readback/expectation/validation/test modules. Keep engines/Ollama closed. Next material/environment audit, remaining semantic gaps and bounded CineTwin repair; native acceptance pending.
+
 ### 2026-11-27 — Static lighting regression passed; exact skeletal rig identity
 
 - Owner confirmed all checks passed at 6111bc4 (static-light Ruff and six-module regression; exact count not supplied). Prior confirmed 224 conversion cases and 252 host/provider cases, Node 23. PR #1 open draft.

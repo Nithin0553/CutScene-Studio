@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+import animation_timing
 import audio_trim
 import event_marker
 import readback_math
@@ -372,24 +374,24 @@ def _asset_path(value: Any) -> str:
     return str(value)
 
 
-def _fixed_play_rate(params: Any) -> float:
-    play_rate = _editor_property(params, "play_rate", 1.0)
-    if isinstance(play_rate, (int, float)):
-        return float(play_rate)
+def _fixed_play_rate(params: Any) -> float | None:
+    play_rate = _editor_property(params, "play_rate")
+    if type(play_rate) in (int, float):
+        return float(play_rate) if math.isfinite(play_rate) and play_rate > 0 else None
     getter = getattr(play_rate, "to_fixed_play_rate", None)
     if callable(getter):
         try:
-            return float(getter())
+            return animation_timing.positive_number(getter())
         except Exception:
             LOGGER.debug("Direct fixed play rate accessor failed", exc_info=True)
     extensions = getattr(unreal, "MovieSceneTimeWarpExtensions", None)
     extension_getter = getattr(extensions, "to_fixed_play_rate", None) if extensions else None
     if callable(extension_getter):
         try:
-            return float(extension_getter(play_rate))
+            return animation_timing.positive_number(extension_getter(play_rate))
         except Exception:
             LOGGER.debug("Fixed play rate unavailable via extension", exc_info=True)
-    return 1.0
+    return None
 
 
 def _matrix_vector(matrix: list[list[float]], vector: tuple[float, float, float]) -> list[float]:
@@ -416,10 +418,15 @@ def _skeletal_track(
             float(tick_rate["numerator"]) / float(tick_rate["denominator"])
             if tick_rate is not None else fps
         )
-        source_offset_seconds = (
-            _frame_number_value(_editor_property(params, "start_frame_offset", 0)) / tick_fps
-            if params is not None else 0.0
-        )
+        source_offset_seconds = None
+        offset_value = _editor_property(params, "start_frame_offset")
+        if offset_value is not None and tick_rate is not None:
+            try:
+                ticks = _frame_number_value(offset_value)
+                if ticks >= 0 and tick_fps > 0:
+                    source_offset_seconds = ticks / tick_fps
+            except (ValueError, TypeError, AttributeError, OverflowError):
+                LOGGER.debug("Native skeletal trim unavailable", exc_info=True)
         easing_ext = getattr(unreal, "MovieSceneSectionEasingExtensions", None)
         ease_in_getter = getattr(easing_ext, "get_ease_in_duration", None)
         ease_out_getter = getattr(easing_ext, "get_ease_out_duration", None)
@@ -438,10 +445,13 @@ def _skeletal_track(
                 if callable(getattr(section, "get_post_roll_frames", None))
                 else _frame_number_value(_editor_property(section, "post_roll_frames", 0))
             ),
-            "play_rate": _fixed_play_rate(params) if params is not None else 1.0,
+            "play_rate": _fixed_play_rate(params) if params is not None else None,
+            "imported_duration_seconds": animation_timing.observed_length(animation),
+            "asset_rate_scale": animation_timing.observed_rate_scale(animation),
         }
 
-        if animation is not None and actor is not None:
+        if (animation is not None and actor is not None
+                and source_offset_seconds is not None and item["play_rate"] is not None):
             duration_seconds = max(0.0, (end_frame - start_frame) / fps)
             try:
                 local_delta, strategy = unreal_compat.extract_animation_root_delta_cm(

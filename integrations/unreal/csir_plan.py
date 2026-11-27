@@ -886,6 +886,13 @@ def build_plan(csir: dict[str, Any], mapping: dict[str, Any]) -> dict[str, Any]:
                         rational_seconds(section["end"]) - rational_seconds(section["start"])
                     )
                     time_scale = float(section.get("time_scale", 1.0))
+                    if (not all(math.isfinite(value) for value in (
+                            source_offset_seconds, timeline_duration_seconds, time_scale))
+                            or source_offset_seconds < 0 or timeline_duration_seconds <= 0
+                            or time_scale <= 0):
+                        raise PlanError("Invalid skeletal animation source timing.")
+                    if section.get("loop") is True:
+                        raise PlanError("Skeletal looping requires a dedicated source loop adapter.")
                     (
                         _source_world_position,
                         source_world_rotation,
@@ -931,6 +938,8 @@ def build_plan(csir: dict[str, Any], mapping: dict[str, Any]) -> dict[str, Any]:
                         "hold_end_frame": seconds_to_frame(duration, fps_n, fps_d),
                         "hold_strategy": "post_roll_last_frame",
                     }
+                    if action["end_frame"] <= action["start_frame"]:
+                        raise PlanError("Skeletal animation is shorter than one target display frame.")
                     if expected_root_delta is not None:
                         action["expected_root_delta_cm"] = list(expected_root_delta)
                         source_profile = _source_root_profile_unreal_cm(

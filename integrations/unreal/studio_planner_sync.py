@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MODULES = (
     ("csir_plan", "integrations/unreal"),
     ("rig_identity", "integrations/unreal"),
+    ("animation_timing", "integrations/unreal"),
     ("source_surface_gap", "packages/studio"),
     ("feature_dispatch", "packages/studio"),
     ("scalar_property_adapter", "packages/studio"),

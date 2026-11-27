@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import animation_timing
 import csir_plan
 import readback_math
 import scene_prep
@@ -107,8 +108,11 @@ def build_expectation(
                 float(plan["display_rate"]["numerator"])
                 / float(plan["display_rate"]["denominator"])
             )
-            if float(action.get("source_offset_seconds", 0.0)) > 0:
-                track["source_offset_seconds"] = float(action["source_offset_seconds"])
+            required_end, tolerance = animation_timing.required_interval(action, plan["display_rate"])
+            track["required_source_end_seconds"] = required_end
+            track["duration_tolerance_seconds"] = tolerance
+            track["asset_rate_scale"] = 1.0
+            track["source_offset_seconds"] = float(action["source_offset_seconds"])
             if float(action.get("blend_in_seconds", 0.0)) > 0:
                 track["ease_in_frames"] = round(float(action["blend_in_seconds"]) * frame_rate)
             if float(action.get("blend_out_seconds", 0.0)) > 0:

@@ -842,3 +842,324 @@ def test_request_native_preflight_never_submits_execution(service, case):
         assert not request.exists()
     assert not (work / 'jobs').exists()
     assert not (work / 'one-click-approval.json').exists()
+
+
+@pytest.fixture
+def ai_execution_fixture(service, monkeypatch):
+    """Synthetic persisted evidence; host authorization and worker gate are real."""
+    import sys
+    from types import SimpleNamespace
+
+    base, tmp = service
+    work = tmp / 'work'
+    candidate_id = 'ai_execution_fixture'
+    candidate = work / 'candidates' / candidate_id
+    candidate.mkdir(parents=True)
+    fields = fixture_files(tmp)
+    fields.update(source_rights_confirmed=True, capture='')
+    cfg = bridge.config_check(fields)
+    mapping = candidate.with_suffix('.mapping.json')
+    mapping.write_bytes(Path(cfg['mapping']).read_bytes())
+    analysis = candidate.with_suffix('.source-analysis.json')
+    analysis.write_text('{}', encoding='utf-8')
+    sequence = '/Game/Trials/LS_Fresh'
+    auth = bridge._ai_auth_module()
+
+    artifacts = {}
+    for name in ('ai-handoff.json', 'coverage-report.json', 'evidence.json',
+                 'transfer-plan.json'):
+        path = candidate / name
+        path.write_text('{}', encoding='utf-8')
+        artifacts[name] = auth.digest(path)
+    setup = candidate / 'automatic-setup.json'
+    setup.write_text('{}', encoding='utf-8')
+    session = {
+        'session_id': 'session_fixture',
+        'source': {'csir_path': cfg['csir'], 'sha256': auth.digest(Path(cfg['csir']))},
+        'target': {'mapping_path': str(mapping), 'mapping_sha256': auth.digest(mapping),
+                   'project_path': cfg['target_project'], 'sequence_asset_path': sequence},
+        'source_capture': None,
+        'ai_analysis': {'path': str(analysis), 'sha256': auth.digest(analysis)},
+        'artifact_sha256': artifacts,
+    }
+    bridge.atomic_json(candidate / 'session.json', session)
+    bridge.atomic_json(work / 'connection.json', cfg)
+    bridge.atomic_json(work / 'active-candidate.json', {
+        'candidate_id': candidate_id, 'candidate_dir': str(candidate),
+        'mapping_copy': str(mapping), 'sequence_path': sequence,
+        'ai_analysis': {'status': 'PREPARED_ADVISORY'},
+        'automatic_setup': {'available': True, 'ready': True, 'blockers': []},
+    })
+    worker = {
+        'heartbeat': datetime.now(UTC).isoformat(), 'project': cfg['target_project'],
+        'level': cfg['level_path'], 'worker': bridge.REQUIRED_WORKER_PROTOCOL,
+        'checkout_root': str(ROOT.resolve()),
+        'worker_source_sha256': auth.digest(ROOT / 'integrations/unreal/studio_local_editor_worker.py'),
+        'worker_instance_id': 'fixture_instance',
+    }
+    bridge.atomic_json(work / 'unreal-worker.json', worker)
+    token = bridge.TOKEN
+    status, request = call(base + '/api/ai-native-preflight',
+                           {'candidate_id': candidate_id}, token)
+    assert status == 200, request
+    request_id = request['request_id']
+    report = {
+        'kind': 'cutsceneai.studio.ai_native_preflight',
+        'status': 'AI_NATIVE_SETUP_PREFLIGHT_PASSED',
+        'candidate_id': candidate_id, 'request_id': request_id,
+        'session_id': session['session_id'],
+        'session_sha256': auth.digest(candidate / 'session.json'),
+        'automatic_setup_sha256': auth.digest(setup), 'artifact_sha256': artifacts,
+        'observed_project': cfg['target_project'], 'observed_level': cfg['level_path'],
+        'sequence_path': sequence, 'worker_instance_id': worker['worker_instance_id'],
+        'worker_source_sha256': worker['worker_source_sha256'],
+        'connection_sha256': auth.digest(work / 'connection.json'),
+        'candidate_record_sha256': auth.digest(work / 'active-candidate.json'),
+        'checked_at': datetime.now(UTC).isoformat(), 'planned_actor_count': 1,
+        'planned_import_count': 0, 'verified_native_mesh_paths': [],
+        'native_import_readback_pending': True, 'execution_authorized': False,
+        'engine_generation_executed': False, 'behavioral_fidelity_established': False,
+    }
+    bridge.atomic_json(work / 'ai-native-preflight.json', report)
+    bridge.atomic_json(work / 'ai-native-preflight-response.json', {
+        'request_id': request_id, 'status': 'AI_NATIVE_PREFLIGHT_COMPLETED',
+        'execution_authorized': False,
+    })
+    status, inspected = call(base + '/api/ai-native-preflight')
+    assert status == 200 and inspected['verified'], inspected
+    payload = {'candidate_id': candidate_id, 'request_id': request_id,
+               'report_sha256': inspected['report_sha256']}
+    # Keep the real authorization and HTTP boundary; synthetic planner and
+    # native asset-manifest results isolate the gate from actual engine data.
+    monkeypatch.setitem(sys.modules, 'prepared_transfer',
+                        SimpleNamespace(verify=lambda _: session))
+    import studio_auto_assets
+
+    manifest_calls = []
+
+    def verify_manifest(*args):
+        manifest_calls.append(args)
+        return {'ready': True}
+
+    monkeypatch.setattr(studio_auto_assets, 'verify', verify_manifest)
+    monkeypatch.setattr(bridge, 'destination_readiness',
+                        lambda _: {'status': 'SCENE_SETUP_REQUIRED', 'ready': False})
+    return SimpleNamespace(base=base, work=work, candidate=candidate, cid=candidate_id,
+                           cfg=cfg, session=session, report=report, worker=worker,
+                           token=token, payload=payload, auth=auth, manifest_calls=manifest_calls)
+
+
+def _approve_fixture(f):
+    status, approved = call(f.base + '/api/approve-ai-execution', f.payload, f.token)
+    assert status == 200, approved
+    assert approved['approved'] is True
+    assert approved['execution_queued'] is False
+    assert not (f.work / 'active-job.json').exists()
+    assert not list((f.work / 'jobs').glob('*.json'))
+    return approved['approval_id']
+
+
+def _queue_fixture(f, approval_id):
+    return call(f.base + '/api/execute',
+                {'candidate_id': f.cid, 'approval_id': approval_id}, f.token)
+
+
+@pytest.mark.parametrize('case', ['valid', 'no_token', 'wrong_report', 'wrong_request',
+                                  'wrong_candidate', 'manual_report', 'legacy_approval'])
+def test_ai_explicit_authorization_is_bound_and_never_queues(ai_execution_fixture, case):
+    f = ai_execution_fixture
+    if case == 'valid':
+        approval_id = _approve_fixture(f)
+        approval = bridge.load_json(f.work / f.auth.APPROVAL_FILE)
+        assert approval['approval_id'] == approval_id
+        assert approval['binding']['candidate_id'] == f.cid
+        assert approval['binding']['record_sha256']['ai-native-preflight.json'] == f.payload['report_sha256']
+        assert approval['binding']['worker_instance_id'] == f.worker['worker_instance_id']
+    else:
+        payload = dict(f.payload)
+        route = '/api/approve-ai-execution'
+        if case == 'wrong_report':
+            payload['report_sha256'] = 'f' * 64
+        elif case == 'wrong_request':
+            payload['request_id'] = 'f' * 32
+        elif case == 'wrong_candidate':
+            payload['candidate_id'] = 'other_candidate'
+        elif case == 'manual_report':
+            (f.work / 'ai-native-preflight-request.json').unlink()
+            (f.work / 'ai-native-preflight-response.json').unlink()
+        elif case == 'legacy_approval':
+            route = '/api/approve-one-click'
+        status, result = call(f.base + route, payload, None if case == 'no_token' else f.token)
+        assert status == (403 if case == 'no_token' else 422), result
+        assert not (f.work / f.auth.APPROVAL_FILE).exists()
+    assert not (f.work / 'active-job.json').exists()
+    assert not list((f.work / 'jobs').glob('*.json'))
+
+
+@pytest.mark.parametrize('case', [
+    'valid', 'no_approval', 'wrong_approval', 'expired_approval', 'worker_restart',
+    'wrong_project', 'wrong_level', 'changed_report', 'changed_response', 'changed_source',
+    'changed_manifest', 'collision', 'manifest_failure', 'duplicate', 'revoked_during_manifest',
+])
+def test_ai_queue_revalidates_authorization_and_manifest(ai_execution_fixture, monkeypatch, case):
+    f = ai_execution_fixture
+    approval_id = '' if case == 'no_approval' else _approve_fixture(f)
+    if case == 'wrong_approval':
+        approval_id = 'f' * 32
+    elif case == 'expired_approval':
+        path = f.work / f.auth.APPROVAL_FILE
+        approval = bridge.load_json(path)
+        approval['approved_at'] = (datetime.now(UTC) - timedelta(seconds=121)).isoformat()
+        bridge.atomic_json(path, approval)
+    elif case in {'worker_restart', 'wrong_project', 'wrong_level'}:
+        key, value = {
+            'worker_restart': ('worker_instance_id', 'restarted'),
+            'wrong_project': ('project', str(f.work / 'Other.uproject')),
+            'wrong_level': ('level', '/Game/Other'),
+        }[case]
+        bridge.atomic_json(f.work / 'unreal-worker.json', {**f.worker, key: value})
+    elif case in {'changed_report', 'changed_response', 'changed_source', 'changed_manifest'}:
+        path = {
+            'changed_report': f.work / 'ai-native-preflight.json',
+            'changed_response': f.work / 'ai-native-preflight-response.json',
+            'changed_source': Path(f.cfg['csir']),
+            'changed_manifest': f.candidate / 'automatic-setup.json',
+        }[case]
+        path.write_bytes(path.read_bytes() + b' ')
+    elif case == 'collision':
+        monkeypatch.setattr(bridge, 'destination_readiness',
+                            lambda _: {'status': 'TARGET_EXISTS', 'ready': False})
+    elif case in {'manifest_failure', 'revoked_during_manifest'}:
+        import studio_auto_assets
+
+        def verify_manifest(*args):
+            if case == 'revoked_during_manifest':
+                (f.work / f.auth.APPROVAL_FILE).unlink()
+                return {'ready': True}
+            return {'ready': False}
+
+        monkeypatch.setattr(studio_auto_assets, 'verify', verify_manifest)
+    elif case == 'duplicate':
+        bridge.atomic_json(f.work / 'jobs' / ('e' * 32 + '.json'),
+                           {'candidate_id': f.cid, 'status': 'BLOCKED_OR_FAILED'})
+    status, result = _queue_fixture(f, approval_id)
+    if case == 'valid':
+        assert status == 200, result
+        assert result['status'] == 'QUEUED'
+        job = bridge.load_json(f.work / 'jobs' / (result['job_id'] + '.json'))
+        assert job['ai_authorization'] == {
+            'approval_id': approval_id,
+            'approval_sha256': f.auth.digest(f.work / f.auth.APPROVAL_FILE),
+        }
+        assert job['automatic_setup'] is True and job['create_level'] is False
+        assert job['generation_status'] == 'NOT_STARTED' and job['fidelity_verified'] is False
+        assert len(f.manifest_calls) == 1
+        assert _queue_fixture(f, approval_id)[0] == 422
+        assert len(list((f.work / 'jobs').glob('*.json'))) == 1
+    else:
+        assert status == 422, result
+        assert not (f.work / 'active-job.json').exists()
+        assert len(list((f.work / 'jobs').glob('*.json'))) == (1 if case == 'duplicate' else 0)
+
+
+@pytest.mark.parametrize('case', [
+    'valid', 'missing_approval', 'wrong_approval_hash', 'restart', 'wrong_job_level',
+    'wrong_job_project', 'wrong_manifest', 'no_automatic_setup', 'new_map', 'duplicate',
+    'collision', 'changed_proof', 'changed_during_probe', 'consumed',
+])
+def test_worker_claim_requires_fresh_native_proof(ai_execution_fixture, monkeypatch, case):
+    import sys
+    from types import SimpleNamespace
+
+    f = ai_execution_fixture
+    approval_id = _approve_fixture(f)
+    status, result = _queue_fixture(f, approval_id)
+    assert status == 200, result
+    job_id = result['job_id']
+    job = bridge.load_json(f.work / 'jobs' / (job_id + '.json'))
+    fake_unreal = SimpleNamespace()
+    monkeypatch.setitem(sys.modules, 'unreal', fake_unreal)
+    worker_path = ROOT / 'integrations/unreal/studio_local_editor_worker.py'
+    spec = importlib.util.spec_from_file_location('ai_execution_gate_worker_test', worker_path)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    worker.WORKSPACE = f.work
+    worker.WORKER_INSTANCE_ID = f.worker['worker_instance_id']
+    import studio_ai_native_preflight as inspector
+
+    # Only the read-only native probe is mocked. Keep real authorization,
+    # file hashes, job identity and exclusive claim behavior.
+    calls = []
+
+    def probe(candidate, **kwargs):
+        calls.append((candidate, kwargs))
+        assert candidate == f.candidate.resolve()
+        assert kwargs['expected_project'] == f.cfg['target_project']
+        assert kwargs['expected_level'] == f.cfg['level_path']
+        assert kwargs['unreal_api'] is fake_unreal
+        if case == 'collision':
+            raise ValueError('Existing actor label: fixture')
+        if case == 'changed_during_probe':
+            path = f.work / 'connection.json'
+            path.write_bytes(path.read_bytes() + b' ')
+        if case == 'changed_proof':
+            return {**f.report, 'planned_actor_count': 2}
+        return f.report.copy()
+
+    monkeypatch.setattr(inspector, 'inspect_candidate', probe)
+    real_reload = worker.importlib.reload
+    monkeypatch.setattr(worker.importlib, 'reload',
+                        lambda module: module if module is inspector else real_reload(module))
+    claim = f.work / 'jobs' / (f.cid + '.ai-execution.used')
+    if case == 'missing_approval':
+        job.pop('ai_authorization')
+    elif case == 'wrong_approval_hash':
+        job['ai_authorization']['approval_sha256'] = 'f' * 64
+    elif case == 'restart':
+        worker.WORKER_INSTANCE_ID = 'restarted'
+    elif case == 'wrong_job_level':
+        job['expected_level'] = '/Game/Other'
+    elif case == 'wrong_job_project':
+        job['expected_project'] = str(f.work / 'Other.uproject')
+    elif case == 'wrong_manifest':
+        job['automatic_setup_manifest'] = str(f.candidate / 'other.json')
+    elif case == 'no_automatic_setup':
+        job['automatic_setup'] = False
+    elif case == 'new_map':
+        job['create_level'] = True
+    elif case == 'duplicate':
+        bridge.atomic_json(f.work / 'jobs' / ('e' * 32 + '.json'),
+                           {'candidate_id': f.cid, 'status': 'QUEUED'})
+    elif case == 'consumed':
+        claim.write_text(job_id, encoding='utf-8')
+    if case == 'valid':
+        worker._verify_and_claim_ai_execution(job, f.candidate.resolve())
+        assert job['ai_execution_preflight_verified'] is True
+        assert claim.read_text(encoding='utf-8').strip() == job_id
+        with pytest.raises(RuntimeError, match='already consumed'):
+            worker._verify_and_claim_ai_execution(job, f.candidate.resolve())
+        assert len(calls) == 1
+    else:
+        expected = {
+            'missing_approval': 'explicit execution authorization',
+            'wrong_approval_hash': 'differs from persisted approval',
+            'restart': 'different worker',
+            'wrong_job_level': 'not the exact authorized',
+            'wrong_job_project': 'not the exact authorized',
+            'wrong_manifest': 'not the exact authorized',
+            'no_automatic_setup': 'not the exact authorized',
+            'new_map': 'not the exact authorized',
+            'duplicate': 'Duplicate AI candidate',
+            'collision': 'Existing actor label',
+            'changed_proof': 'Fresh native inspection differs',
+            'changed_during_probe': 'different worker or candidate',
+            'consumed': 'already consumed',
+        }[case]
+        with pytest.raises((ValueError, RuntimeError), match=expected):
+            worker._verify_and_claim_ai_execution(job, f.candidate.resolve())
+        assert claim.exists() is (case == 'consumed')
+        assert not job.get('ai_execution_preflight_verified')
+        assert len(calls) == (1 if case in {'collision', 'changed_proof', 'changed_during_probe'} else 0)
+    # Calling the gate alone must not run setup or generation.
+    assert job['generation_status'] == 'NOT_STARTED'
+    assert job['fidelity_verified'] is False

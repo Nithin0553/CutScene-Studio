@@ -8,7 +8,7 @@ const css = fs.readFileSync('apps/studio-web/cinematic.css', 'utf8');
 
 function boot({editorReady = true, censusUnresolved = false, multiSources = false,
   restoredJob = '', restoredPending = false, restoredAI = false, aiFailure = false,
-  missingAI = false} = {}) {
+  missingAI = false, approvalFails = false} = {}) {
   const listeners = {}, calls = [], requests = [];
   let html = '', writes = 0, copied = '';
   const app = {
@@ -92,7 +92,8 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
           inspectionRequested=true;
           result={status:'AI_NATIVE_PREFLIGHT_REQUESTED',verified:false,execution_authorized:false};
         }else result=inspectionRequested?
-          {status:'AI_NATIVE_SETUP_PREFLIGHT_PASSED',verified:true,execution_authorized:false}:
+          {status:'AI_NATIVE_SETUP_PREFLIGHT_PASSED',verified:true,execution_authorized:false,
+           candidate_id:candidate.candidate_id,request_id:'b'.repeat(32),report_sha256:'c'.repeat(64)}:
           {status:'AI_NATIVE_PREFLIGHT_REQUIRED',verified:false,execution_authorized:false};
       } else if (url === '/api/pick-folder') {
         result = {cancelled:false, path:body.kind==='unity'?unity:unreal};
@@ -141,8 +142,15 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
         assert.equal(body.candidate_id,'candidate001');
         approval={candidate_id:body.candidate_id,source_csir:connected.csir};
         result={approved:true,candidate_id:body.candidate_id};
+      } else if (url === '/api/approve-ai-execution') {
+        assert.equal(body.candidate_id,candidate.candidate_id);
+        assert.equal(body.request_id,'b'.repeat(32));
+        assert.equal(body.report_sha256,'c'.repeat(64));
+        if(approvalFails)return {ok:false,status:422,json:async()=>({error:'Native inspection expired'})};
+        result={approved:true,approval_id:'d'.repeat(32),execution_queued:false};
       } else if (url === '/api/execute') {
-        assert.equal(body.candidate_id,'candidate001');
+        assert.equal(body.candidate_id,candidate.candidate_id);
+        if(candidate.ai_analysis)assert.equal(body.approval_id,'d'.repeat(32));
         currentJob = {job_id:'a'.repeat(32),status:'QUEUED',generation_status:'NOT_STARTED'};
         result=currentJob;
       } else if (url.startsWith('/api/jobs/')) {
@@ -490,6 +498,7 @@ async function setupAI(x,census=x.censusB){
 
 function assertNoNativeCalls(x){
   assert.ok(!x.calls.includes('/api/approve-one-click'));
+  assert.ok(!x.calls.includes('/api/approve-ai-execution'));
   assert.ok(!x.calls.includes('/api/execute'));
 }
 
@@ -588,7 +597,46 @@ async function testExplicitAIInspectionNeverExecutes(){
   assertNoNativeCalls(x);
 }
 
+async function testExplicitAIApprovalQueuesOnlyOnce(){
+  const x=boot({restoredAI:true,editorReady:true});
+  await x.pause();
+  await x.pause();
+  await x.click('view-ai-plan');
+  await x.click('authorize-ai-transfer');
+  assertNoNativeCalls(x);
+  await x.click('inspect-ai-target');
+  await x.poll();
+  assert.match(x.app.innerHTML,/Authorize and transfer/);
+  assertNoNativeCalls(x);
+  await x.click('authorize-ai-transfer');
+  await x.poll();
+  assert.equal(x.calls.filter(r=>r==='/api/approve-ai-execution').length,1);
+  assert.equal(x.calls.filter(r=>r==='/api/execute').length,1);
+  assert.ok(x.calls.indexOf('/api/approve-ai-execution')<x.calls.indexOf('/api/execute'));
+  assert.ok(!x.calls.includes('/api/approve-one-click'));
+  await x.click('authorize-ai-transfer');
+  await x.poll();
+  assert.equal(x.calls.filter(r=>r==='/api/execute').length,1);
+}
+
+async function testAIApprovalFailureNeverQueues(){
+  const x=boot({restoredAI:true,editorReady:true,approvalFails:true});
+  await x.pause();
+  await x.pause();
+  await x.click('view-ai-plan');
+  await x.click('inspect-ai-target');
+  await x.poll();
+  await x.click('authorize-ai-transfer');
+  assert.match(x.app.innerHTML,/Native inspection expired/);
+  assert.equal(x.calls.filter(r=>r==='/api/approve-ai-execution').length,1);
+  assert.ok(!x.calls.includes('/api/execute'));
+  await x.poll();
+  assert.ok(!x.calls.includes('/api/execute'));
+}
+
 (async()=>{
+  await testExplicitAIApprovalQueuesOnlyOnce();
+  await testAIApprovalFailureNeverQueues();
   await testExplicitAIInspectionNeverExecutes();
   await testAIPlanStopsBeforeNativeExecution();
   await testRestoredAIPlanNeverAutoQueues();
@@ -608,5 +656,5 @@ async function testExplicitAIInspectionNeverExecutes(){
   await testStrictCensusBlockAndExplicitRecovery();
   await testManualCSIRAndCensus();
   await testMissingSelectedCensusFailsClosed();
-  console.log('Cinematic UI backend contract: 19 scenarios including explicit read-only AI inspection, AI preparation-only, failure recovery, native errors and Home-first startup passed.');
+  console.log('Cinematic UI backend contract: 21 scenarios including explicit AI approval, read-only AI inspection, AI preparation-only, failure recovery, native errors and Home-first startup passed.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

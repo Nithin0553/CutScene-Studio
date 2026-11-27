@@ -674,3 +674,22 @@ raise SystemExit(studio_ai_verifier.main(args))
         assert expected in proof["reason"]
     assert set(candidate.iterdir()) == {path for path in before if path.parent == candidate}
     assert all(path.read_bytes() == data for path, data in before.items())
+
+
+def test_candidate_helper_binds_explicit_target_project(handoff_files, tmp_path, monkeypatch):
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.syspath_prepend(str(root / "tools"))
+    import studio_candidate
+
+    _, paths, _ = handoff_files
+    source, mapping, analysis = paths
+    project = tmp_path / "Staging.uproject"
+    project.write_text("{}", encoding="utf-8")
+    folder = tmp_path / "bound-candidate"
+    _, session = studio_candidate.prepare_candidate(
+        source, mapping, None, "/Game/Staging/LS_Bound", folder,
+        analysis_path=analysis, target_project=project,
+    )
+    assert session["target"]["project_path"] == str(project.resolve())
+    assert studio_candidate.prepared_transfer.verify(folder) == session
+    assert session["engine_generation_executed"] is False

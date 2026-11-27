@@ -931,6 +931,7 @@ def ai_execution_fixture(service, monkeypatch):
                'report_sha256': inspected['report_sha256']}
     # Keep the real authorization and HTTP boundary; synthetic planner and
     # native asset-manifest results isolate the gate from actual engine data.
+    monkeypatch.syspath_prepend(str(ROOT / 'tools'))
     monkeypatch.setitem(sys.modules, 'prepared_transfer',
                         SimpleNamespace(verify=lambda _: session))
     import studio_auto_assets

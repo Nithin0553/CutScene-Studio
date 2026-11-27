@@ -132,3 +132,71 @@ def test_worker_consumes_only_read_only_native_preflight_request(tmp_path, monke
     assert calls == ([request] if case in {'valid', 'failure'} else [])
     assert not (tmp_path/'jobs').exists()
     assert not (tmp_path/'one-click-approval.json').exists()
+
+
+@pytest.mark.parametrize('case', ['valid', 'not_verified', 'wrong_world', 'wrong_project',
+                                  'dirty', 'unknown_dirty', 'occupied'])
+def test_ai_fresh_map_rechecks_before_creating_level(tmp_path, monkeypatch, case):
+    """Exercise the actual level-creation boundary with a fake editor only."""
+    editor_dir = ROOT / 'integrations/unreal'
+    monkeypatch.syspath_prepend(str(editor_dir))
+    from studio_ai_execution_auth import FRESH_LEVEL
+
+    target = tmp_path / 'Target.uproject'
+    target.write_text('{}', encoding='utf-8')
+    old_level = '/Temp/Untitled'
+    loaded = ['/Temp/Other' if case == 'wrong_world' else old_level]
+    project = tmp_path / 'Wrong.uproject' if case == 'wrong_project' else target
+    assets = {FRESH_LEVEL} if case == 'occupied' else set()
+    mutations = []
+    world = SimpleNamespace(get_path_name=lambda: loaded[0] + '.World')
+    editor_type = object()
+    level_type = object()
+
+    def new_level(path):
+        mutations.append(('new_level', path))
+        assets.add(path)
+        loaded[0] = path
+        return True
+
+    editor = SimpleNamespace(get_editor_world=lambda: world)
+    level_editor = SimpleNamespace(new_level=new_level)
+    fake = SimpleNamespace(
+        Paths=SimpleNamespace(get_project_file_path=lambda: str(project)),
+        UnrealEditorSubsystem=editor_type, LevelEditorSubsystem=level_type,
+        get_editor_subsystem=lambda klass: editor if klass is editor_type else level_editor,
+        EditorLoadingAndSavingUtils=SimpleNamespace(get_dirty_map_packages=lambda: (
+            None if case == 'unknown_dirty' else [object()] if case == 'dirty' else [])),
+        EditorAssetLibrary=SimpleNamespace(
+            does_asset_exist=lambda path: path in assets,
+            make_directory=lambda path: mutations.append(('directory', path))),
+        log=lambda _: None,
+    )
+    monkeypatch.setitem(sys.modules, 'unreal', fake)
+    spec = importlib.util.spec_from_file_location(
+        'fresh_map_boundary_worker_test', editor_dir / 'studio_local_editor_worker.py')
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    job = {
+        'expected_project': str(target.resolve()), 'expected_level': FRESH_LEVEL,
+        'create_level': True, 'ai_authorization': {'approval_id': 'fixture'},
+        'ai_execution_preflight_verified': case != 'not_verified',
+        'ai_approved_observed_level': old_level,
+    }
+    if case == 'valid':
+        worker._ensure_target_level(job)
+        assert mutations == [('directory', '/Game/CutSceneAI/AutoTransfer'),
+                             ('new_level', FRESH_LEVEL)]
+        assert loaded[0] == FRESH_LEVEL
+    else:
+        expected = {
+            'not_verified': 'preflight is required',
+            'wrong_world': 'level changed',
+            'wrong_project': 'project changed',
+            'dirty': 'unsaved changes',
+            'unknown_dirty': 'Cannot confirm',
+            'occupied': 'Target level already exists',
+        }[case]
+        with pytest.raises((ValueError, RuntimeError), match=expected):
+            worker._ensure_target_level(job)
+        assert not mutations

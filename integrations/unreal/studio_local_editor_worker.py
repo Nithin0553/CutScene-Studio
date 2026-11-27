@@ -80,8 +80,12 @@ def _ensure_target_level(job):
             raise RuntimeError('Wrong Unreal level is loaded.')
         return
     if job.get('ai_authorization'):
+        if job.get('ai_execution_preflight_verified') is not True:
+            raise RuntimeError('Fresh AI execution preflight is required before map creation.')
         import studio_ai_native_preflight as inspector
 
+        if os.path.normcase(_loaded_project()) != os.path.normcase(str(Path(job['expected_project']).resolve())):
+            raise RuntimeError('Loaded Unreal project changed after AI authorization.')
         if _loaded_level() != job.get('ai_approved_observed_level'):
             raise RuntimeError('Loaded Unreal level changed after AI authorization.')
         inspector.preflight_new_level(unreal, expected_project=job['expected_project'],

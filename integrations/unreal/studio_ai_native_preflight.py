@@ -40,10 +40,14 @@ def preflight_new_level(api, *, expected_project, expected_level, observed_level
         world = api.get_editor_subsystem(api.UnrealEditorSubsystem).get_editor_world()
         saving = getattr(api, 'EditorLoadingAndSavingUtils', None)
         dirty_maps = getattr(saving, 'get_dirty_map_packages', None)
+        if world is None or str(world.get_path_name()).split('.')[0] != observed_level:
+            raise ValueError('Loaded world changed during fresh-map inspection.')
         if callable(dirty_maps):
-            dirty = bool(dirty_maps())
+            dirty = bool(list(dirty_maps()))
         else:
-            dirty = bool(world.get_outermost().is_dirty())
+            dirty = world.get_outermost().is_dirty()
+            if not isinstance(dirty, bool):
+                raise ValueError('Unknown world dirty state.')
     except Exception as exc:
         raise RuntimeError("Cannot confirm current Unreal map is saved.") from exc
     if dirty:

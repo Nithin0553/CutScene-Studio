@@ -679,6 +679,7 @@ def test_invalid_ai_toggle_and_non_object_request_return_422(service):
     'valid', 'expired', 'restart', 'wrong_level', 'changed_connection',
     'changed_candidate', 'changed_session', 'changed_setup', 'changed_artifact',
     'changed_source', 'authorization_flag', 'missing_report',
+    'request_pending', 'request_completed', 'request_failed', 'wrong_request',
 ])
 def test_ai_native_preflight_report_is_read_only_and_candidate_bound(service, case):
     base, tmp = service
@@ -758,13 +759,80 @@ def test_ai_native_preflight_report_is_read_only_and_candidate_bound(service, ca
     }.get(case)
     if changed:
         changed.write_bytes(changed.read_bytes() + b'\n')
+    if case.startswith('request_') or case == 'wrong_request':
+        request_id = 'a' * 32
+        bridge.atomic_json(work / 'ai-native-preflight-request.json', {
+            'kind': 'cutsceneai.studio.ai_native_preflight_request',
+            'request_id': request_id, 'candidate_id': candidate_id,
+            'worker_instance_id': 'worker_fixture',
+            'worker_source_sha256': worker_sha,
+            'candidate_record_sha256': sha(active), 'connection_sha256': sha(config),
+            'requested_at': now.isoformat(),
+        })
+        if case != 'request_pending':
+            bridge.atomic_json(work / 'ai-native-preflight-response.json', {
+                'request_id': request_id,
+                'status': ('AI_NATIVE_PREFLIGHT_FAILED' if case == 'request_failed'
+                           else 'AI_NATIVE_PREFLIGHT_COMPLETED'),
+                'execution_authorized': False, 'reason': 'Native test failure',
+            })
+        report['request_id'] = 'b' * 32 if case == 'wrong_request' else request_id
+        bridge.atomic_json(report_path, report)
     status, result = call(base + '/api/ai-native-preflight')
     assert status == 200
     assert result['execution_authorized'] is False
-    assert result['verified'] is (case == 'valid')
+    assert result['verified'] is (case in {'valid', 'request_completed'})
     assert result['status'] == (
-        'AI_NATIVE_SETUP_PREFLIGHT_PASSED' if case == 'valid'
+        'AI_NATIVE_SETUP_PREFLIGHT_PASSED' if case in {'valid', 'request_completed'}
+        else 'AI_NATIVE_PREFLIGHT_REQUESTED' if case == 'request_pending'
         else 'AI_NATIVE_PREFLIGHT_REQUIRED'
     )
     assert not (work / 'active-job.json').exists()
+    assert not (work / 'one-click-approval.json').exists()
+
+
+@pytest.mark.parametrize('case', ['valid', 'unauthorized', 'wrong_candidate', 'no_rights',
+                                  'not_ready', 'wrong_level', 'active_job'])
+def test_request_native_preflight_never_submits_execution(service, case):
+    base, tmp = service
+    work = tmp / 'work'
+    candidate_id = 'ai_candidate'
+    candidate = work / 'candidates' / candidate_id
+    candidate.mkdir(parents=True)
+    cfg = fixture_files(tmp)
+    cfg['source_rights_confirmed'] = case != 'no_rights'
+    bridge.atomic_json(work / 'connection.json', cfg)
+    bridge.atomic_json(work / 'active-candidate.json', {
+        'candidate_id': candidate_id, 'candidate_dir': str(candidate),
+        'ai_analysis': {'status': 'PREPARED_ADVISORY'},
+        'automatic_setup': {'ready': case != 'not_ready'},
+    })
+    bridge.atomic_json(work / 'unreal-worker.json', {
+        'heartbeat': datetime.now(UTC).isoformat(),
+        'project': cfg['target_project'],
+        'level': '/Game/Other' if case == 'wrong_level' else cfg['level_path'],
+        'worker': bridge.REQUIRED_WORKER_PROTOCOL, 'checkout_root': str(ROOT.resolve()),
+        'worker_source_sha256': hashlib.sha256(
+            (ROOT / 'integrations/unreal/studio_local_editor_worker.py').read_bytes()).hexdigest(),
+        'worker_instance_id': 'fixture_instance',
+    })
+    if case == 'active_job':
+        bridge.atomic_json(work / 'active-job.json', {'job_id': 'existing'})
+    payload = {'candidate_id': 'wrong' if case == 'wrong_candidate' else candidate_id}
+    token = None if case == 'unauthorized' else bridge.TOKEN
+    status, result = call(base + '/api/ai-native-preflight', payload, token)
+    request = work / 'ai-native-preflight-request.json'
+    if case == 'valid':
+        assert status == 200
+        assert result['status'] == 'AI_NATIVE_PREFLIGHT_REQUESTED'
+        assert result['execution_authorized'] is False
+        saved = bridge.load_json(request)
+        assert saved['candidate_id'] == candidate_id
+        assert saved['worker_instance_id'] == 'fixture_instance'
+        assert saved['request_id'] == result['request_id']
+        assert call(base + '/api/ai-native-preflight', payload, token)[1] == result
+    else:
+        assert status == (403 if case == 'unauthorized' else 422)
+        assert not request.exists()
+    assert not (work / 'jobs').exists()
     assert not (work / 'one-click-approval.json').exists()

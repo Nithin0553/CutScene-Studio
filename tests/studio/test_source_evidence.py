@@ -509,3 +509,94 @@ def test_studio_candidate_requires_capture_for_world_lock(
         )
     assert not out.exists()
     assert not out.with_suffix(".mapping.json").exists()
+
+
+@pytest.fixture
+def bridge_ai_fixture(handoff_files, tmp_path, monkeypatch):
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.syspath_prepend(str(root / "tools"))
+    import studio_local_bridge as bridge
+
+    from packages.studio import ollama_provider, transfer_agent
+
+    _, paths, _ = handoff_files
+    source, mapping, _ = paths
+    target = tmp_path / "Test.uproject"
+    target.write_text("{}", encoding="utf-8")
+    work = tmp_path / "work"
+    bridge.atomic_json(work / "connection.json", bridge.config_check({
+        "csir": str(source),
+        "mapping": str(mapping),
+        "target_project": str(target),
+        "level_path": "/Game/Staging/L_Test",
+        "source_rights_confirmed": True,
+    }))
+
+    class LocalProvider:
+        model = "fixture-model"
+
+        def models(self):
+            return (self.model,)
+
+    agent = FakeAgent()
+    monkeypatch.setattr(ollama_provider, "OllamaProvider", LocalProvider)
+    monkeypatch.setattr(transfer_agent, "TransferAgent", lambda provider: agent)
+    return bridge, work, agent
+
+
+def test_studio_prepare_automatically_attaches_ai_analysis_and_blocks_execution(bridge_ai_fixture):
+    bridge, work, agent = bridge_ai_fixture
+    result = bridge.prepare(work, {"enable_ai_agent": True})
+    assert len(agent.calls) == 1
+    assert result["ai_analysis"]["decision_counts"]["proposed"] == 1
+    assert result["ai_analysis"]["execution_enabled"] is False
+    assert result["engine_generation_executed"] is False
+    assert result["behavioral_fidelity_established"] is False
+    assert result["prepared_options"] == {}
+    candidate = Path(result["candidate_dir"])
+    import prepared_transfer
+
+    session = prepared_transfer.verify(candidate)
+    assert Path(session["ai_analysis"]["path"]).is_file()
+    assert len(session["artifact_sha256"]) == 4
+    assert bridge.load_json(work / "active-candidate.json") == result
+    with pytest.raises(ValueError, match="native execution is not enabled"):
+        bridge.approve_one_click(result["candidate_id"], work)
+    with pytest.raises(ValueError, match="native execution is not enabled"):
+        bridge.queue_trial(result["candidate_id"], work)
+    assert not (work / "active-job.json").exists()
+
+
+def test_studio_ai_failure_preserves_report_without_preparing_candidate(bridge_ai_fixture, monkeypatch):
+    bridge, work, agent = bridge_ai_fixture
+
+    def fail(feature, candidates):
+        return MappingDecision("failed", None, "Local model inference failed: fixture")
+
+    monkeypatch.setattr(agent, "select_mapping", fail)
+    with pytest.raises(ValueError, match="AI source analysis requires review"):
+        bridge.prepare(work, {"enable_ai_agent": True})
+    reports = list((work / "candidates").glob("*.source-analysis.json"))
+    assert len(reports) == 1
+    report = bridge.load_json(reports[0])
+    assert report["provider_failed"] is True
+    assert report["execution_authorized"] is False
+    assert not (work / "active-candidate.json").exists()
+    assert not list((work / "candidates").glob("*/session.json"))
+    assert not (work / "active-job.json").exists()
+
+
+@pytest.mark.parametrize("enabled", [False, "true"])
+def test_studio_ai_opt_in_requires_boolean_and_does_not_infer_when_disabled(
+    bridge_ai_fixture, enabled,
+):
+    bridge, work, agent = bridge_ai_fixture
+    if enabled is False:
+        result = bridge.prepare(work, {"enable_ai_agent": False})
+        assert "ai_analysis" not in result
+        assert not list((work / "candidates").glob("*.source-analysis.json"))
+    else:
+        with pytest.raises(ValueError, match="enable_ai_agent must be Boolean"):
+            bridge.prepare(work, {"enable_ai_agent": enabled})
+        assert not (work / "active-candidate.json").exists()
+    assert not agent.calls

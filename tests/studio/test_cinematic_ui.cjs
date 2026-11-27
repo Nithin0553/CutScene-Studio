@@ -21,6 +21,7 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
   let candidate = null;
   let currentJob = null;
   let approval = null;
+  let inspectionRequested = false;
   let done = false;
   const unity = 'D:/CutSceneAI_Unity';
   const unreal = 'D:/CutSceneAI_Unreal';
@@ -85,6 +86,14 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
           destination_readiness: candidate && editorReady ?
             {status: 'READY', ready:true, candidate_id:candidate.candidate_id} :
             {status: 'WAITING_FOR_UNREAL', ready:false, next_action:'Open Unreal Editor'}};
+      } else if (url === '/api/ai-native-preflight') {
+        if(opts.method==='POST'){
+          assert.equal(body.candidate_id,candidate.candidate_id);
+          inspectionRequested=true;
+          result={status:'AI_NATIVE_PREFLIGHT_REQUESTED',verified:false,execution_authorized:false};
+        }else result=inspectionRequested?
+          {status:'AI_NATIVE_SETUP_PREFLIGHT_PASSED',verified:true,execution_authorized:false}:
+          {status:'AI_NATIVE_PREFLIGHT_REQUIRED',verified:false,execution_authorized:false};
       } else if (url === '/api/pick-folder') {
         result = {cancelled:false, path:body.kind==='unity'?unity:unreal};
       } else if (url === '/api/discover') {
@@ -565,7 +574,22 @@ async function testAIBestEffortStillPreparationOnly(){
   assertNoNativeCalls(x);
 }
 
+async function testExplicitAIInspectionNeverExecutes(){
+  const x=boot({restoredAI:true,editorReady:true});
+  await x.pause();
+  await x.pause();
+  await x.click('view-ai-plan');
+  assert.match(x.app.innerHTML,/Inspect target \(read-only\)/);
+  assert.equal(x.requests.filter(r=>r.url==='/api/ai-native-preflight'&&r.body.candidate_id).length,0);
+  await x.click('inspect-ai-target');
+  await x.poll();
+  assert.equal(x.requests.filter(r=>r.url==='/api/ai-native-preflight'&&r.body.candidate_id).length,1);
+  assert.match(x.app.innerHTML,/Native setup inspection passed/);
+  assertNoNativeCalls(x);
+}
+
 (async()=>{
+  await testExplicitAIInspectionNeverExecutes();
   await testAIPlanStopsBeforeNativeExecution();
   await testRestoredAIPlanNeverAutoQueues();
   await testAIErrorNeverFallsBack();
@@ -584,5 +608,5 @@ async function testAIBestEffortStillPreparationOnly(){
   await testStrictCensusBlockAndExplicitRecovery();
   await testManualCSIRAndCensus();
   await testMissingSelectedCensusFailsClosed();
-  console.log('Cinematic UI backend contract: 18 scenarios including AI preparation-only, failure recovery, native errors and Home-first startup passed.');
+  console.log('Cinematic UI backend contract: 19 scenarios including explicit read-only AI inspection, AI preparation-only, failure recovery, native errors and Home-first startup passed.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

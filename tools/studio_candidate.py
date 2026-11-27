@@ -13,10 +13,13 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-for part in ("packages/studio", "packages/cinetwin", "integrations/unreal"):
-    path = ROOT / part
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+# The tools directory also contains a transfer_backend.py CLI. Always put
+# the real planner first, even if its directory is already on sys.path.
+for part in ("packages/cinetwin", "integrations/unreal", "packages/studio"):
+    path = str(ROOT / part)
+    while path in sys.path:
+        sys.path.remove(path)
+    sys.path.insert(0, path)
 
 import prepared_transfer
 

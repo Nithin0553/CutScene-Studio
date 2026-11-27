@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — 121 targeted tests passed; candidate command lint cleanup
+
+- Owner confirmed 121 targeted tests passed in 6.76 s, including immutable AI preparation, tamper rejection and Studio candidate command regression cases. Ruff reported only TRY203 in tools/studio_candidate.py (redundant catch-and-reraise). Removed the redundant handler (3248104), retaining exclusive file creation, error propagation and failed-trial evidence; no conversion or verification logic changed. Post-cleanup tests and Ruff remain to be rerun.
+- Next: fast-forward the existing branch, repeat targeted tests and Ruff, run actual saved Benchmark001 analysis through the new Studio candidate CLI with a fresh destination and output directory on D:. Native worker dependency validation, host/UI integration, model lifecycle and repair remain pending. Full suite last confirmed at 787 passed / 7 external Stage 4 skips before ten new regression cases. No engine launches or Ollama inference needed for CLI validation.
+
 ### 2026-11-26 — Actual AI candidate verified; Studio candidate command accepts saved analysis
 
 - Owner supplied actual Benchmark001 candidate console output: session c95847b5f522c2478da4, AWAITING_UNREAL_PREFLIGHT, ai_analysis attached, immutable verify returned identical session, four artifact hashes verified (transfer-plan, coverage-report, evidence, ai-handoff), five proposed and two withheld, zero failed/unanalysed, 17 backend actions unchanged. Execution authorized false, generation executed false, fidelity established false. Fresh candidate and mapping on D: outside Git. Only console evidence inspected; native target unverified. Eight new immutable regression tests and Ruff not explicitly reported yet; last full confirmed baseline 787 passed / 7 external evidence skips.

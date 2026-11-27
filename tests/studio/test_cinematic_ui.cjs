@@ -7,7 +7,8 @@ const src = fs.readFileSync('apps/studio-web/cinematic.js', 'utf8');
 const css = fs.readFileSync('apps/studio-web/cinematic.css', 'utf8');
 
 function boot({editorReady = true, censusUnresolved = false, multiSources = false,
-  restoredJob = '', restoredPending = false} = {}) {
+  restoredJob = '', restoredPending = false, restoredAI = false, aiFailure = false,
+  missingAI = false} = {}) {
   const listeners = {}, calls = [], requests = [];
   let html = '', writes = 0, copied = '';
   const app = {
@@ -31,9 +32,18 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
   let availableCensuses = true;
   const level = '/Game/CutSceneAI/L_Trial01';
   const file = unreal + '/CutSceneAI.uproject';
-  if(restoredJob || restoredPending) {
+  const advisory = {status:'PREPARED_ADVISORY',execution_enabled:false,
+    decision_counts:{proposed:5,unsupported:2,failed:0,not_analyzed:0},active_ced_alerts:186,
+    reason:'Native AI verifier integration is pending; preparation only.'};
+  if(restoredJob || restoredPending || restoredAI) {
     connected={unity_project:unity,target_project:file,level_path:level,
       csir,scene_name:'Benchmark002',source_rights_confirmed:true};
+    if(restoredAI){
+      candidate={candidate_id:'saved_ai_candidate',action_total:17,ai_analysis:advisory,
+        automatic_setup:{available:true,ready:true,blockers:[]}};
+      // Even a stale approval must not auto-submit a preparation-only candidate.
+      approval={candidate_id:candidate.candidate_id,source_csir:csir};
+    }
     if(restoredPending){
       candidate={candidate_id:'older_pending_candidate',action_total:26,
         automatic_setup:{available:true,ready:true,blockers:[]}};
@@ -112,7 +122,10 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
             unresolved_components:0}
         ]:[]};
       } else if (url === '/api/prepare') {
-        candidate = {candidate_id:'candidate001',action_total:29,
+        if(body.enable_ai_agent&&aiFailure)return {ok:false,status:422,
+          json:async()=>({error:'Local model inference failed; no candidate prepared.'})};
+        candidate = {candidate_id:'candidate001',action_total:body.enable_ai_agent?17:29,
+          ...(body.enable_ai_agent&&!missingAI?{ai_analysis:advisory}:{}),
           automatic_setup:{available:true,ready:true,blockers:[],planned_imports:18,planned_actors:10}};
         result = candidate;
       } else if (url === '/api/approve-one-click') {
@@ -169,7 +182,8 @@ async function testOneClick() {
   await x.click('browse-unity');
   await x.click('browse-unreal');
   assert.match(x.app.innerHTML,/Cutscene/);
-  assert.doesNotMatch(x.app.innerHTML,/Enable AI agents|LangGraph/);
+  assert.match(x.app.innerHTML,/Enable AI Agent \(local Ollama\)/);
+  assert.doesNotMatch(x.app.innerHTML,/name="enable-ai-agent" checked/);
   await x.change('source-rights',null,true);
   await x.click('connect');
   assert.ok(x.calls.includes('/api/connect-projects'));
@@ -189,6 +203,7 @@ async function testOneClick() {
   assert.equal(preparation.body.source_feature_surface_path,x.censusB,
     'forward the exact user-selected census, not the first/newest export');
   assert.equal(preparation.body.require_complete_source_features,true);
+  assert.equal(preparation.body.enable_ai_agent,false);
   const approval=x.requests.find(req=>req.url==='/api/approve-one-click');
   assert.deepEqual(Object.keys(approval.body),['candidate_id']);
   assert.ok(!x.calls.some(url=>url==='/api/agents'));
@@ -452,7 +467,97 @@ async function testRunningJobShowsResumeInsteadOfDisabledStart() {
   assert.equal(x.calls.filter(v=>v==='/api/prepare').length,0);
 }
 
+async function setupAI(x,census=x.censusB){
+  await x.pause();
+  await x.click('projects');
+  await x.click('browse-unity');
+  await x.click('browse-unreal');
+  await x.change('source-rights',null,true);
+  await x.click('connect');
+  await x.change('census',census);
+  await x.change('enable-ai-agent',null,true);
+  assert.match(x.app.innerHTML,/Prepare AI Plan/);
+}
+
+function assertNoNativeCalls(x){
+  assert.ok(!x.calls.includes('/api/approve-one-click'));
+  assert.ok(!x.calls.includes('/api/execute'));
+}
+
+async function testAIPlanStopsBeforeNativeExecution(){
+  const x=boot({editorReady:true});
+  await setupAI(x);
+  await x.click('start');
+  await x.poll();
+  const preparation=x.requests.find(req=>req.url==='/api/prepare');
+  assert.equal(preparation.body.enable_ai_agent,true);
+  assert.equal(preparation.body.source_feature_surface_path,x.censusB);
+  assert.match(x.app.innerHTML,/AI plan prepared/);
+  assert.match(x.app.innerHTML,/Proposed mappings/);
+  assert.match(x.app.innerHTML,/Withheld mappings/);
+  assert.match(x.app.innerHTML,/No native changes performed/);
+  assert.match(x.app.innerHTML,/AI_PREPARED/);
+  assertNoNativeCalls(x);
+  await x.click('home');
+  assert.match(x.app.innerHTML,/View AI Plan/);
+  await x.click('view-ai-plan');
+  await x.poll();
+  assert.match(x.app.innerHTML,/AI plan prepared/);
+  assertNoNativeCalls(x);
+}
+
+async function testRestoredAIPlanNeverAutoQueues(){
+  const x=boot({restoredAI:true,editorReady:true});
+  await x.pause();
+  await x.pause();
+  assert.match(x.app.innerHTML,/class="landing"/);
+  await x.poll();
+  await x.click('view-ai-plan');
+  assert.match(x.app.innerHTML,/AI plan prepared/);
+  assertNoNativeCalls(x);
+  await x.click('projects');
+  assert.match(x.app.innerHTML,/Prepare New AI Plan/);
+  await x.change('enable-ai-agent',null,false);
+  assert.match(x.app.innerHTML,/Start New Transfer/);
+  await x.change('census',x.censusB);
+  await x.click('start-fresh');
+  assert.equal(x.requests.find(r=>r.url==='/api/prepare').body.enable_ai_agent,false);
+  assert.equal(x.calls.filter(r=>r==='/api/execute').length,1);
+}
+
+async function testAIErrorNeverFallsBack(){
+  for(const options of [{aiFailure:true},{missingAI:true}]){
+    const x=boot(options);
+    await setupAI(x);
+    await x.click('start');
+    await x.poll();
+    assert.match(x.app.innerHTML,/Transfer blocked/);
+    assert.match(x.app.innerHTML,/Local model inference failed|AI evidence missing/);
+    assert.equal(x.calls.filter(r=>r==='/api/prepare').length,1);
+    assertNoNativeCalls(x);
+  }
+}
+
+async function testAIBestEffortStillPreparationOnly(){
+  const x=boot({censusUnresolved:true});
+  await setupAI(x,x.censusA);
+  await x.click('start');
+  assert.match(x.app.innerHTML,/Prepare supported parts/);
+  assert.equal(x.calls.filter(r=>r==='/api/prepare').length,0);
+  await x.click('best-effort');
+  await x.poll();
+  const req=x.requests.find(r=>r.url==='/api/prepare');
+  assert.equal(req.body.enable_ai_agent,true);
+  assert.equal(req.body.require_complete_source_features,false);
+  assert.match(x.app.innerHTML,/AI plan prepared/);
+  assertNoNativeCalls(x);
+}
+
 (async()=>{
+  await testAIPlanStopsBeforeNativeExecution();
+  await testRestoredAIPlanNeverAutoQueues();
+  await testAIErrorNeverFallsBack();
+  await testAIBestEffortStillPreparationOnly();
   await testSelectionLayoutContract();
   await testStartupAlwaysHomeWithSavedResults();
   await testStartupHomeWithRunningJobCanResume();
@@ -467,5 +572,5 @@ async function testRunningJobShowsResumeInsteadOfDisabledStart() {
   await testStrictCensusBlockAndExplicitRecovery();
   await testManualCSIRAndCensus();
   await testMissingSelectedCensusFailsClosed();
-  console.log('Cinematic UI backend contract: 14 scenarios including actionable Start Transfer recovery, native errors, responsive selectors and Home-first startup passed.');
+  console.log('Cinematic UI backend contract: 18 scenarios including AI preparation-only, failure recovery, native errors and Home-first startup passed.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -351,8 +351,12 @@ def inspect_active_ai_candidate():
     report_path = WORKSPACE / 'ai-native-preflight.json'
     # A failed explicit reinspection must not leave an older passing report.
     report_path.unlink(missing_ok=True)
-    active = _load(WORKSPACE / 'active-candidate.json')
-    config = _load(WORKSPACE / 'connection.json')
+    active_path = WORKSPACE / 'active-candidate.json'
+    config_path = WORKSPACE / 'connection.json'
+    active_bytes = active_path.read_bytes()
+    config_bytes = config_path.read_bytes()
+    active = json.loads(active_bytes.decode('utf-8-sig'))
+    config = json.loads(config_bytes.decode('utf-8-sig'))
     candidate_id = str(active.get('candidate_id') or '')
     if not candidate_id.isascii() or not candidate_id.replace('_', '').isalnum():
         raise RuntimeError('Invalid active candidate identity.')
@@ -376,16 +380,14 @@ def inspect_active_ai_candidate():
         folder, expected_project=config['target_project'],
         expected_level=config['level_path'], unreal_api=unreal,
     )
-    if (_load(WORKSPACE / 'active-candidate.json') != active
-            or _load(WORKSPACE / 'connection.json') != config):
+    if (active_path.read_bytes() != active_bytes
+            or config_path.read_bytes() != config_bytes):
         raise RuntimeError('Studio connection or candidate changed during native preflight.')
     report = {**proof, 'candidate_id': candidate_id, 'checked_at': _now(),
               'worker_source_sha256': WORKER_SOURCE_SHA256,
               'worker_instance_id': WORKER_INSTANCE_ID,
-              'connection_sha256': hashlib.sha256(
-                  (WORKSPACE / 'connection.json').read_bytes()).hexdigest(),
-              'candidate_record_sha256': hashlib.sha256(
-                  (WORKSPACE / 'active-candidate.json').read_bytes()).hexdigest()}
+              'connection_sha256': hashlib.sha256(config_bytes).hexdigest(),
+              'candidate_record_sha256': hashlib.sha256(active_bytes).hexdigest()}
     _save(report_path, report)
     return report
 

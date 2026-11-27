@@ -83,6 +83,12 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Live Studio AI preparation succeeded in explicit best-effort mode
+
+- Owner supplied actual Studio screenshot showing AI_PREPARED, Source analysis and verified candidate: five proposed mappings, two withheld, failed/not analyzed 0/0, 13 planned actions, 186 active source CED alerts, ten partial native source snapshots. Native AI verifier integration pending; no native changes performed, fidelity unverified. The preceding strict census block identified two AudioListener components; best-effort preparation retains these limitations. This confirms live UI/host/model preparation at the screenshot level; raw candidate artifacts not yet inspected.
+- Action count differs from previous 17-action example-mapping baseline. Inspect live active-candidate record, session, transfer-plan, coverage-report, evidence, ai-handoff and copied mapping before deciding why. UI-generated bindings, optional capture/hierarchy/adaptive options can differ; do not assume exactly four missing features from action count alone. Confirm source digest and five exact proposal attributions and preserve missing source findings; no native job should exist. Request read-only summary or actual JSON artifacts from isolated D: workspace. No application changes in this checkpoint. Latest Python 804 passed / 7 known external skips, Node 18 scenarios passed; Ruff after earlier cleanup not explicitly supplied.
+- Next native verifier integration must check canonical module origin and available dependencies, preserve immutable verification and existing approval/preflight/non-overwrite gates; model lifecycle and bounded CineTwin repair remain outstanding. Do not launch native engines for current evidence inspection.
+
 ### 2026-11-26 — Live Studio strict source census blocked before AI inference
 
 - Owner supplied screenshot of the actual Studio AI preparation screen. Strict source census blocked two component/scope findings: UnityEngine.AudioListener on CAM_A_Wide and CAM_B_Close, each NATIVE_COMPONENT_EXTRACTION_OR_ADAPTER_REQUIRED. Ten native source snapshots are recorded as partial (collision, URP and signal behavior Unreal-unverified). UI explicitly reports no Unreal assets modified and offers Prepare supported parts, confirming AI mode is selected. No model inference or candidate preparation success established yet.

@@ -191,7 +191,7 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
   return {app,calls,requests,click,change,poll:async()=>{poll();await pause();await pause();},
     writes:()=>writes, copied:()=>copied, pause,finish:()=>{done=true;},
     csir,otherCsir,censusA,censusB,invalidCensus,
-    removeCensuses:()=>{availableCensuses=false;}};
+    removeCensuses:()=>{availableCensuses=false;}, releaseMemory:()=>{memoryBlocked=false;}};
 }
 
 async function testOneClick() {
@@ -666,6 +666,16 @@ async function testResidentModelBlocksAuthorization(){
   assert.doesNotMatch(x.app.innerHTML,/Authorize and transfer/);
   await x.click('authorize-ai-transfer');
   assertNoNativeCalls(x);
+  // Idle expiry is a read-only state transition, not approval.
+  x.releaseMemory();
+  await x.poll();
+  assert.match(x.app.innerHTML,/Ollama reports no resident models/);
+  assert.match(x.app.innerHTML,/Authorize and transfer/);
+  assertNoNativeCalls(x);
+  await x.click('authorize-ai-transfer');
+  await x.poll();
+  assert.equal(x.calls.filter(r=>r==='/api/approve-ai-execution').length,1);
+  assert.equal(x.calls.filter(r=>r==='/api/execute').length,1);
 }
 
 (async()=>{

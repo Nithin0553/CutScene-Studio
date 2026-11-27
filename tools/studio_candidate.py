@@ -70,19 +70,16 @@ def prepare_candidate(
         # dynamic children before creating a single Unreal asset.
         copy["enable_cinetwin_hierarchy"] = True
     mapping_file.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with mapping_file.open("x", encoding="utf-8") as handle:
-            json.dump(copy, handle, indent=2)
-            handle.write("\n")
-        options = {"analysis_path": analysis_path} if analysis_path is not None else {}
-        session = prepared_transfer.prepare(
-            csir_path, mapping_file, output_folder,
-            capture_path=capture_path, **options,
-        )
-    except Exception:
-        # Never remove an existing output folder, even if preparation fails.
-        # The new mapping copy is harmless evidence for a failed trial.
-        raise
+    # Keep the new mapping as evidence if preparation fails; never remove
+    # or overwrite existing candidate files.
+    with mapping_file.open("x", encoding="utf-8") as handle:
+        json.dump(copy, handle, indent=2)
+        handle.write("\n")
+    options = {"analysis_path": analysis_path} if analysis_path is not None else {}
+    session = prepared_transfer.prepare(
+        csir_path, mapping_file, output_folder,
+        capture_path=capture_path, **options,
+    )
     return mapping_file, session
 
 

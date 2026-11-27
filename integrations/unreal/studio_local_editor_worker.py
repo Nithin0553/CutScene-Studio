@@ -344,7 +344,7 @@ def _execute(job):
 
 
 
-def inspect_active_ai_candidate():
+def inspect_active_ai_candidate(request=None):
     """Explicit read-only preflight, not an execution approval or queue operation."""
     if BUSY:
         raise RuntimeError('Finish the active Unreal job before inspecting another candidate.')
@@ -358,6 +358,11 @@ def inspect_active_ai_candidate():
     active = json.loads(active_bytes.decode('utf-8-sig'))
     config = json.loads(config_bytes.decode('utf-8-sig'))
     candidate_id = str(active.get('candidate_id') or '')
+    if request is not None and (
+            request.get('candidate_id') != candidate_id
+            or request.get('candidate_record_sha256') != hashlib.sha256(active_bytes).hexdigest()
+            or request.get('connection_sha256') != hashlib.sha256(config_bytes).hexdigest()):
+        raise RuntimeError('Native inspection request no longer matches the active candidate.')
     if not candidate_id.isascii() or not candidate_id.replace('_', '').isalnum():
         raise RuntimeError('Invalid active candidate identity.')
     root = (WORKSPACE / 'candidates').resolve()
@@ -388,6 +393,8 @@ def inspect_active_ai_candidate():
               'worker_instance_id': WORKER_INSTANCE_ID,
               'connection_sha256': hashlib.sha256(config_bytes).hexdigest(),
               'candidate_record_sha256': hashlib.sha256(active_bytes).hexdigest()}
+    if request is not None:
+        report['request_id'] = request['request_id']
     _save(report_path, report)
     return report
 
@@ -496,6 +503,39 @@ def _write_heartbeat():
     })
 
 
+def _process_ai_preflight_request():
+    """Consume only the fixed read-only inspection request on the editor thread."""
+    path = WORKSPACE / 'ai-native-preflight-request.json'
+    response_path = WORKSPACE / 'ai-native-preflight-response.json'
+    if not path.is_file():
+        return
+    request = _load(path)
+    request_id = request.get('request_id')
+    if not isinstance(request_id, str) or len(request_id) != 32 or any(
+            ch not in '0123456789abcdef' for ch in request_id):
+        return
+    if response_path.is_file() and _load(response_path).get('request_id') == request_id:
+        return
+    if request.get('worker_instance_id') != WORKER_INSTANCE_ID:
+        return
+    response = {'request_id': request_id, 'execution_authorized': False,
+                'status': 'AI_NATIVE_PREFLIGHT_FAILED'}
+    try:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(
+            request['requested_at'])).total_seconds()
+        if (request.get('kind') != 'cutsceneai.studio.ai_native_preflight_request'
+                or request.get('worker_source_sha256') != WORKER_SOURCE_SHA256
+                or not 0 <= age < 120):
+            raise RuntimeError('Native inspection request is stale or invalid.')
+        if (WORKSPACE / 'active-job.json').exists():
+            raise RuntimeError('A job is already active.')
+        inspect_active_ai_candidate(request)
+        response['status'] = 'AI_NATIVE_PREFLIGHT_COMPLETED'
+    except Exception as exc:
+        response['reason'] = str(exc)
+    _save(response_path, response)
+
+
 def _tick(_delta):
     global LAST_TICK, BUSY
     if BUSY or time.monotonic() - LAST_TICK < 1.0:
@@ -511,6 +551,8 @@ def _tick(_delta):
             except Exception as report_error:
                 unreal.log_error('[CutSceneAI Studio] Unable to record readiness failure: ' + str(report_error))
             unreal.log_warning('[CutSceneAI Studio] Destination inspection unavailable: ' + str(readiness_error))
+        _process_ai_preflight_request()
+        _write_heartbeat()
         jobs_folder = WORKSPACE / 'jobs'
         if not jobs_folder.is_dir():
             return

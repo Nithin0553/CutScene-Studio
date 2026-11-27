@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Unreal bundled Python dependency gap identified
+
+- Owner confirmed UE 5.8.3 bundled Python executable exists, CPython 3.11.8, 64-bit. Isolated -I -B import of jsonschema failed with ModuleNotFoundError; Studio host venv is Python 3.12.10. No Unreal replay yet.
+- Install jsonschema and compatible dependencies only into a fresh D: runtime dependency directory using host pip with explicit Windows amd64 / CPython 3.11 wheel tags, no global installation, no bytecode compilation and no pip cache. Prefer the same jsonschema version as the verified Studio environment. Explicitly prepend that directory in the bundled interpreter for a read-only import probe and verifier replay; -I ignores PYTHONPATH. Do not copy the host venv site-packages, alter engine installation, or launch editor. If installation/import fails, retain diagnostic output and do not enable native execution. Embedded interpreter dependency configuration and worker authorization still pending. No application code changes.
+
 ### 2026-11-26 — Installed Unreal runtime located
 
 - Owner confirmed Epic Launcher installation manifest lists UE_5.8, release 5.8.3-58210709, installed on the required D: drive. Old Unreal 4.0 registry entry is not the target runtime.

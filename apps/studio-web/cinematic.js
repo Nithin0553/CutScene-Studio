@@ -9,7 +9,7 @@
   const state = {screen:'home', phase:'IDLE', busy:false, info:'', error:'', status:null,
     discovery:null, folders:{unity:'',unreal:''}, unrealProject:'', csir:'', level:'',
     sourceRights:false, allowPartial:false, enableAI:false, candidate:null, job:null, verification:null,
-    diagnosis:null, feedback:null, running:false, detailsOpen:false, menuOpen:false,
+    diagnosis:null, feedback:null, aiPreflight:null, running:false, detailsOpen:false, menuOpen:false,
     censusOptions:[], censusPath:'', censusSelection:null, censusIssue:false, editorHelpOpen:false};
   const pathRoot = () => String(state.status?.repo_root||'').replaceAll('\\','/');
   const workerCommand = () => {
@@ -215,7 +215,11 @@
       resultRow('Planned actions',state.candidate.action_total??'Not reported')+
       resultRow('Active source CED alerts',a.active_ced_alerts??'Not reported')+
       '<p class="subnote">'+esc(a.reason||'Native execution is not enabled.')+' No native changes performed. Fidelity remains unverified.</p>'+
-      button('Back to projects','projects',false,'secondary')+'</section>';
+      '<h3>Read-only Unreal inspection</h3>'+
+       '<p class="subnote">'+esc(state.aiPreflight?.verified?'Native setup inspection passed. Import readback and execution approval remain pending.':state.aiPreflight?.reason||'Connect the selected staging level to inspect the candidate.')+'</p>'+
+       button('Inspect target (read-only)','inspect-ai-target',state.busy||!validEditor()||!state.candidate.automatic_setup?.ready||state.aiPreflight?.status==='AI_NATIVE_PREFLIGHT_REQUESTED','secondary')+
+       (!validEditor()?'<pre>'+esc(workerCommand())+'</pre>'+button('Copy connection command','copy-worker',false,'secondary'):'')+
+       button('Back to projects','projects',false,'secondary')+'</section>';
   }
   function transfer(){
     const phase=state.phase,d=readiness(),j=state.job||{};
@@ -412,6 +416,9 @@
   async function refresh(){
     const s=await api('status');state.status=s;
     if(!state.running)state.candidate=s.candidate||null;
+    if(aiCandidate()&&state.screen==='transfer'){
+      try{state.aiPreflight=await api('ai-native-preflight');}catch{state.aiPreflight=null;}
+    }else state.aiPreflight=null;
     if(s.active_job)state.job=await api('jobs/'+s.active_job);
     if(terminal(state.job)){
       state.phase=generated()?'COMPLETE':'BLOCKED';
@@ -567,6 +574,16 @@
     }
     if(name==='view-ai-plan'){
       if(aiCandidate()&&!state.job){state.screen='transfer';state.phase='AI_PREPARED';state.running=false;render();}
+      return;
+    }
+    if(name==='inspect-ai-target'){
+      if(state.busy||!aiCandidate()||state.job||!validEditor()||!state.candidate.automatic_setup?.ready)return;
+      state.busy=true;state.error='';render();
+      try{
+        state.aiPreflight=await api('ai-native-preflight',{candidate_id:state.candidate.candidate_id});
+        state.info='Read-only inspection requested. No transfer has been authorized.';
+      }catch(e){state.error=e.message;state.aiPreflight=null;}
+      finally{state.busy=false;render();}
       return;
     }
     if(name==='resume-transfer'){

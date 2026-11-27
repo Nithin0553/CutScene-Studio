@@ -818,13 +818,35 @@ def create_handler(webroot: Path, folder: Path = WORKSPACE):
             return super().do_GET()
 
         def do_POST(self):
-            if not self.permitted() or self.headers.get('X-CSAI-Token') != TOKEN:
-                return self.reply(403, {'error': 'Local session token required.'})
-            size_str = self.headers.get('Content-Length', '0')
-            if not size_str.isdigit() or int(size_str) > MAX_BODY:
+            # Consume only a bounded, correctly framed request before sending
+            # a rejection. Closing a Windows socket with unread request bytes
+            # can reset the connection before the client receives HTTP 403.
+            # Untrusted bodies are never decoded or dispatched before authorization.
+            authorized = self.permitted() and self.headers.get('X-CSAI-Token') == TOKEN
+            lengths = self.headers.get_all('Content-Length', [])
+            size_str = lengths[0] if lengths else '0'
+            if self.headers.get('Transfer-Encoding') is not None or len(lengths) > 1:
+                return self.reply(400, {'error': 'Unsupported request framing.'})
+            if (not size_str.isascii() or not size_str.isdigit()
+                    or len(size_str) > len(str(MAX_BODY)) or int(size_str) > MAX_BODY):
                 return self.reply(413, {'error': 'Request too large.'})
+            size = int(size_str)
+            previous_timeout = self.connection.gettimeout()
+            self.connection.settimeout(5.0)
             try:
-                data = json.loads(self.rfile.read(int(size_str)))
+                raw = self.rfile.read(size)
+            except TimeoutError:
+                return self.reply(408, {'error': 'Request body timed out.'})
+            except OSError:
+                return self.reply(400, {'error': 'Request body could not be read.'})
+            finally:
+                self.connection.settimeout(previous_timeout)
+            if len(raw) != size:
+                return self.reply(400, {'error': 'Incomplete request body.'})
+            if not authorized:
+                return self.reply(403, {'error': 'Local session token required.'})
+            try:
+                data = json.loads(raw)
                 if not isinstance(data, dict):
                     raise TypeError('Expected JSON request object.')
                 route = urlparse(self.path).path

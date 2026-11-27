@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 for part in ("packages/studio", "packages/cinetwin", "integrations/unreal"):
     path = ROOT / part
     if str(path) not in sys.path:
@@ -22,13 +24,14 @@ import prepared_transfer
 def prepare_candidate(
     csir_path: Path,
     mapping_path: Path,
-    capture_path: Path,
+    capture_path: Path | None,
     sequence_path: str,
     output_folder: Path,
     *,
     skeletal_root_world_lock: bool = False,
     hierarchy_transfer: bool = False,
     transfer_options: dict[str, Any] | None = None,
+    analysis_path: Path | None = None,
 ) -> tuple[Path, dict]:
     """Write fresh mapping next to new output and source-verified prepared artifacts."""
     mapping_file = output_folder.with_suffix(".mapping.json")
@@ -43,8 +46,12 @@ def prepare_candidate(
         raise ValueError("Candidate cannot overwrite the original Level Sequence path.")
     if previous.get("overwrite_sequence") is True:
         raise ValueError("Unsafe source mapping allows sequence overwrite.")
-    if not capture_path.is_file():
+    if capture_path is not None and not capture_path.is_file():
         raise ValueError("Source CineTwin capture missing.")
+    if skeletal_root_world_lock and capture_path is None:
+        raise ValueError("Skeletal root world lock requires source CineTwin capture.")
+    if analysis_path is not None and not analysis_path.is_file():
+        raise ValueError("AI source analysis missing.")
     copy = dict(previous)
     copy["sequence_asset_path"] = sequence_path
     copy["overwrite_sequence"] = False
@@ -67,9 +74,10 @@ def prepare_candidate(
         with mapping_file.open("x", encoding="utf-8") as handle:
             json.dump(copy, handle, indent=2)
             handle.write("\n")
+        options = {"analysis_path": analysis_path} if analysis_path is not None else {}
         session = prepared_transfer.prepare(
             csir_path, mapping_file, output_folder,
-            capture_path=capture_path,
+            capture_path=capture_path, **options,
         )
     except Exception:
         # Never remove an existing output folder, even if preparation fails.
@@ -82,7 +90,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Safe new Studio transfer candidate")
     parser.add_argument("--csir", required=True, type=Path)
     parser.add_argument("--mapping", required=True, type=Path)
-    parser.add_argument("--capture", required=True, type=Path)
+    parser.add_argument("--capture", type=Path, help="Optional source CineTwin capture")
+    parser.add_argument("--analysis", type=Path, help="Saved advisory AI source analysis")
     parser.add_argument("--sequence", required=True)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--skeletal-root-world-lock", action="store_true")
@@ -91,7 +100,10 @@ def main(argv: list[str] | None = None) -> int:
         mapping_copy, session = prepare_candidate(
             args.csir, args.mapping, args.capture, args.sequence, args.out,
             skeletal_root_world_lock=args.skeletal_root_world_lock,
+            analysis_path=args.analysis,
         )
+        if prepared_transfer.verify(args.out) != session:
+            raise prepared_transfer.PreparedTransferError("Candidate verification differs.")
     except (ValueError, OSError, KeyError, json.JSONDecodeError,
             prepared_transfer.PreparedTransferError) as exc:
         print("[CutSceneAI Studio] CANDIDATE BLOCKED:", str(exc), file=sys.stderr)
@@ -99,6 +111,10 @@ def main(argv: list[str] | None = None) -> int:
     print("[CutSceneAI Studio] Prepared unique candidate:", args.out)
     print("[CutSceneAI Studio] Copied mapping:", mapping_copy)
     print("[CutSceneAI Studio] Source-track coverage:", session["track_coverage"])
+    print("[CutSceneAI Studio] Session ID:", session["session_id"])
+    print("[CutSceneAI Studio] AI evidence attached:", "ai_analysis" in session)
+    print("[CutSceneAI Studio] Verified artifacts:", len(session["artifact_sha256"]))
+    print("[CutSceneAI Studio] Immutable verification passed.")
     print("[CutSceneAI Studio] Engine generation NOT run; target fidelity UNVERIFIED.")
     return 0
 

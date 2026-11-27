@@ -5,6 +5,7 @@ import importlib.util
 import json
 import sys
 import threading
+from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
@@ -96,3 +97,66 @@ def test_api_accepts_assets_folder_and_empty_unreal_map_project(tmp_path):
         assert not (t/'Content'/'CutSceneAI'/'AutoTransfer'/'L_Studio_Fresh.umap').exists()
     finally:
         server.shutdown();server.server_close();thread.join()
+
+
+def test_rejected_post_drains_bounded_body_without_dispatch(tmp_path, monkeypatch):
+    def forbidden_picker(_):
+        raise AssertionError('Unauthorized request reached folder picker')
+
+    monkeypatch.setattr(d, 'browse_project_folder', forbidden_picker)
+    web = tmp_path / 'web'
+    web.mkdir()
+    work = tmp_path / 'work'
+    server = ThreadingHTTPServer(('127.0.0.1', 0), bridge.create_handler(web, work))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f'http://127.0.0.1:{server.server_port}'
+        token = call(base + '/api/status')[1]['token']
+        # Large, deliberately invalid JSON. Authorization must precede parsing.
+        for headers in ({}, {'X-CSAI-Token': 'invalid'},
+                        {'X-CSAI-Token': token, 'Origin': 'https://foreign.invalid'}):
+            conn = HTTPConnection('127.0.0.1', server.server_port, timeout=10)
+            try:
+                conn.request('POST', '/api/pick-folder', body=b'!' * bridge.MAX_BODY,
+                             headers=headers)
+                with conn.getresponse() as response:
+                    assert response.status == 403
+                    assert 'token' in json.loads(response.read())['error'].lower()
+            finally:
+                conn.close()
+        assert not work.exists()
+        assert call(base + '/api/status')[0] == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def test_post_rejects_oversize_and_ambiguous_framing_without_waiting_for_body(tmp_path):
+    web = tmp_path / 'web'
+    web.mkdir()
+    server = ThreadingHTTPServer(('127.0.0.1', 0), bridge.create_handler(web, tmp_path / 'work'))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        for headers, expected in (
+            ([('Content-Length', str(bridge.MAX_BODY + 1))], 413),
+            ([('Content-Length', '1'), ('Content-Length', '2')], 400),
+            ([('Transfer-Encoding', 'chunked')], 400),
+        ):
+            conn = HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+            try:
+                conn.putrequest('POST', '/api/pick-folder')
+                for name, value in headers:
+                    conn.putheader(name, value)
+                conn.endheaders()
+                with conn.getresponse() as response:
+                    assert response.status == expected
+                    assert 'error' in json.loads(response.read())
+            finally:
+                conn.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()

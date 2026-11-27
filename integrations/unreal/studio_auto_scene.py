@@ -7,6 +7,7 @@ Does not claim materials, retargeting, audio sync or cross-engine fidelity.
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import traceback
@@ -35,6 +36,33 @@ def _level(api):
 
 def _klass(asset):
     return str(asset.get_class().get_name()) if asset is not None else ''
+
+
+def preflight_primitive_meshes(manifest, api):
+    """Resolve allowlisted read-only engine geometry before any mutations."""
+    path = assets_plan.source_identity.UNREAL_CUBE_ASSET
+    resolved = {}
+    for row in manifest['actors']:
+        primitive = row.get('source_primitive')
+        if primitive is None:
+            continue
+        if (primitive != 'unity_builtin_cube' or row.get('kind') != 'entity.prop'
+                or row.get('mesh_path') != path):
+            raise AutomaticSetupError('Unsupported source primitive mapping.')
+        if path in resolved:
+            continue
+        obj = api.load_asset(path)
+        if _klass(obj) != 'StaticMesh' or str(obj.get_path_name()) != path:
+            raise AutomaticSetupError('Required Unreal native Cube mesh unavailable: '+path)
+        if not hasattr(api, 'StaticMeshComponent') or not callable(getattr(obj, 'get_bounds', None)):
+            raise AutomaticSetupError('Unreal native Cube verification API unavailable.')
+        bounds = obj.get_bounds()
+        for axis in ('x', 'y', 'z'):
+            if (not math.isclose(float(getattr(bounds.origin, axis)), 0.0, abs_tol=0.01)
+                    or not math.isclose(float(getattr(bounds.box_extent, axis)), 50.0, abs_tol=0.01)):
+                raise AutomaticSetupError('Unreal native Cube bounds differ from centered 100 cm geometry.')
+        resolved[path] = obj
+    return resolved
 
 
 def _task(api, source, dest, kind, skeleton=None, embedded_materials=False):
@@ -156,7 +184,7 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
         asset_ops={row['path']:row for row in receipt['asset_operations']}
         actor_ops={row['name']:row for row in receipt['actor_operations']}
         meshes={}
-        props={}
+        props=preflight_primitive_meshes(manifest, api)
         groups=[('SkeletalMesh',manifest['imports']),('StaticMesh',manifest['imports']),('AnimSequence',manifest['imports']),
                 ('SoundWave',manifest['imports']),('Texture2D',manifest['imports'])]
         for kind,records in groups:
@@ -233,6 +261,11 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
             actor.set_actor_label(row['label'],mark_dirty=True)
             if actor.get_actor_label()!=row['label']:
                 raise AutomaticSetupError('Unreal renamed actor unexpectedly: '+row['name'])
+            if row.get('source_primitive'):
+                component = actor.get_component_by_class(api.StaticMeshComponent)
+                mesh = component.get_editor_property('static_mesh') if component is not None else None
+                if _klass(mesh) != 'StaticMesh' or str(mesh.get_path_name()) != row['mesh_path']:
+                    raise AutomaticSetupError('Spawned primitive mesh readback differs: '+row['name'])
             operation['status']='ACTOR_LABEL_CHECKED'
             receipt['actors_created'].append({'name':row['name'],'label':row['label'],'kind':kind})
             receipt['failed_step']=None
@@ -246,7 +279,8 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
             # texture or discard both actors as ambiguous. Old manifests without
             # this field retain their conservative global matching behavior.
             for row in manifest['actors']:
-                if row['kind'] not in ('entity.character', 'entity.prop'):
+                # Never change engine-owned primitive assets/materials.
+                if row.get('source_primitive') or row['kind'] not in ('entity.character', 'entity.prop'):
                     continue
                 candidates = (actor_materials.get(row['name'], [])
                               if actor_materials is not None

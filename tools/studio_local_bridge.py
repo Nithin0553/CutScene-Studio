@@ -340,6 +340,8 @@ def prepare(folder: Path = WORKSPACE, options: dict[str, Any] | None = None) -> 
     ai_options = {'analysis_path': analysis_path} if analysis_path is not None else {}
     if config.get('capture'):
         extra = {'transfer_options': overrides} if overrides else {}
+        if ai_enabled:
+            extra['target_project'] = Path(config['target_project'])
         mapping_copy, session = prepare_candidate(
             Path(config['csir']), Path(config['mapping']), Path(config['capture']),
             new_sequence, candidate_dir,

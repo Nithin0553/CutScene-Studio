@@ -596,7 +596,7 @@ def test_studio_ai_opt_in_requires_boolean_and_does_not_infer_when_disabled(
         assert "ai_analysis" not in result
         assert not list((work / "candidates").glob("*.source-analysis.json"))
     else:
-        with pytest.raises(ValueError, match="enable_ai_agent must be Boolean"):
+        with pytest.raises(TypeError, match="enable_ai_agent must be Boolean"):
             bridge.prepare(work, {"enable_ai_agent": enabled})
         assert not (work / "active-candidate.json").exists()
     assert not agent.calls

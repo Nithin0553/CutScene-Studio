@@ -343,6 +343,42 @@ def _execute(job):
 
 
 
+def inspect_active_ai_candidate():
+    """Explicit read-only preflight, not an execution approval or queue operation."""
+    if BUSY:
+        raise RuntimeError('Finish the active Unreal job before inspecting another candidate.')
+    active = _load(WORKSPACE / 'active-candidate.json')
+    config = _load(WORKSPACE / 'connection.json')
+    candidate_id = str(active.get('candidate_id') or '')
+    if not candidate_id.isascii() or not candidate_id.replace('_', '').isalnum():
+        raise RuntimeError('Invalid active candidate identity.')
+    root = (WORKSPACE / 'candidates').resolve()
+    folder = (root / candidate_id).resolve()
+    if folder.parent != root or folder != Path(active['candidate_dir']).resolve():
+        raise RuntimeError('Active AI candidate is outside the expected workspace.')
+    if not active.get('ai_analysis') or not config.get('source_rights_confirmed'):
+        raise RuntimeError('Prepare an AI candidate and confirm source asset rights first.')
+    session = _load(folder / 'session.json')
+    if (session['source']['csir_path'] != config['csir']
+            or session['target']['mapping_path'] != active['mapping_copy']
+            or session['target']['sequence_asset_path'] != active['sequence_path']):
+        raise RuntimeError('Active AI candidate no longer matches the connected source or sequence.')
+    import studio_ai_native_preflight
+    expected = (ROOT / 'integrations/unreal/studio_ai_native_preflight.py').resolve()
+    if Path(getattr(studio_ai_native_preflight, '__file__', '')).resolve() != expected:
+        raise RuntimeError('Wrong AI native preflight checkout; restart Unreal Editor.')
+    importlib.reload(studio_ai_native_preflight)
+    proof = studio_ai_native_preflight.inspect_candidate(
+        folder, expected_project=config['target_project'],
+        expected_level=config['level_path'], unreal_api=unreal,
+    )
+    if (_load(WORKSPACE / 'active-candidate.json') != active
+            or _load(WORKSPACE / 'connection.json') != config):
+        raise RuntimeError('Studio connection or candidate changed during native preflight.')
+    return {**proof, 'candidate_id': candidate_id, 'checked_at': _now(),
+            'worker_source_sha256': WORKER_SOURCE_SHA256}
+
+
 def _update_destination_readiness():
     """Inspect the loaded editor and candidate; never create an actor/asset."""
     active = WORKSPACE / 'active-candidate.json'

@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-27 — Persistence audit import formatting
+
+- Owner reported one remaining I001 diagnostic at 3b03462: extra blank line between imports and LOGGER. Removed exactly that blank line; diagnostic logging and behavior unchanged. No Python regression output supplied for static lighting yet.
+- Rerun the same Ruff and static lighting regression commands. No engine execution or new fidelity evidence.
+
 ### 2026-11-27 — Static lighting persistence audit lint correction
 
 - Owner reported one remaining Ruff BLE001 diagnostic at 2a34ad6 in the existing native sequence enumeration exception handler. No static lighting Python regression result supplied yet; latest confirmed conversion suite remains 224 passes.

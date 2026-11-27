@@ -1000,14 +1000,33 @@ def build_plan(csir: dict[str, Any], mapping: dict[str, Any]) -> dict[str, Any]:
 
         elif ced_type == "event.trigger":
             for section in track.get("sections", []):
-                signal_id = section.get("payload", {}).get("signal", {}).get("signal_asset_id")
+                payload = section.get("payload", {}).get("signal") or {}
+                signal_id = payload.get("signal_asset_id")
                 signal = assets.get(signal_id)
-                label = signal["name"] if signal else track.get("name", "CutSceneAI_Event")
+                label = signal["name"] if signal else track.get("name") or "CutSceneAI_Event"
+                timestamp = rational_seconds(section["start"])
+                if not math.isfinite(timestamp) or timestamp < 0:
+                    raise PlanError("Invalid source event timestamp.")
+                metadata = {
+                    "source_section_id": section.get("section_id"),
+                    "source_track_id": track.get("track_id"),
+                    "source_binding_entity_id": track.get("binding_entity_id"),
+                    "source_section_type": section.get("ced_type"),
+                    "signal_asset_id": signal_id,
+                    "signal_asset_resolved": signal is not None,
+                    "emit_once": payload.get("emit_once"),
+                    "retroactive": payload.get("retroactive"),
+                    "execution_status": "ANNOTATION_ONLY_CALLBACK_UNMAPPED",
+                }
+                for flag in ("emit_once", "retroactive"):
+                    if metadata[flag] is not None and type(metadata[flag]) is not bool:
+                        raise PlanError("Invalid source signal flag: " + flag)
                 plan["actions"].append(
                     {
                         "kind": "marker",
                         "label": label,
-                        "frame": seconds_to_frame(rational_seconds(section["start"]), fps_n, fps_d),
+                        "frame": seconds_to_frame(timestamp, fps_n, fps_d),
+                        "event_source_evidence": metadata,
                     }
                 )
 

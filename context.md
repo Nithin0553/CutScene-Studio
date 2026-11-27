@@ -83,6 +83,13 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-27 — Audio trim regression verified; source signal evidence and marker adapter
+
+- Owner confirmed at b293b08: Ruff all checks passed; expanded conversion/validation regression 181 passed in 16.97 s. Prior host/provider suite 252 passed in 123.29 s; Node 23 scenarios. These are separate targeted suites, not additive full-suite counts. Draft PR #1 remains open.
+- Audited Unity SignalEmitter capture, existing event.trigger planner, native marker generation/readback and validation. Unity already captures emit_once/retroactive and signal asset identity; previous planner discarded flags. Added immutable marker action event_source_evidence with track/section/binding identity, signal resolution, nullable authored flags and explicit annotation-only callback-unmapped status. No inferred receiver, arbitrary code, Blueprint endpoint or signal execution. CED event remains partial; metadata is plan evidence, not native callback readback.
+- Added native event_marker adapter requiring explicit DISPLAY_RATE insertion and retrieval (Epic UE5.8 AddMarkedFrameToSequence API, legacy unqualified insertion removed). AI read-only native inspection and deterministic builder both probe required reflected API before mutation; marker readback distinguishes actual empty list from unavailable measurement; validation marks explicit unavailable evidence INCOMPLETE. No callback fidelity claim. Existing candidate plans containing events must be freshly prepared if replay no longer matches; immutable history untouched.
+- Added 17 software test cases (4 planner, 5 validation, 8 mock native marker). New tests not run remotely. Rerun prior 181-case suite plus test_event_marker.py and test_unreal_readback_contract.py, then Ruff on changed pure planner/validation/readback/preflight/helper/tests. No UI change; keep Unity, Unreal and Ollama closed. Next audit remaining lighting/animation/material adapters and source receiver capture/explicit callback binding design; bounded CineTwin repair remains pending.
+
 ### 2026-11-27 — Audio lint passed; native clip-in adapter
 
 - Owner reported "All checks passed!" after 9b6b239; confirms lint, no separate numerical Python output supplied. Retain 252 targeted passes in 123.29 s as latest explicit count, Node 23. Draft PR #1 open. Previous audio easing software suite result not independently counted.

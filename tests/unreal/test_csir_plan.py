@@ -451,3 +451,41 @@ def test_audio_source_trim_survives_plan_and_expectation():
     assert action["start_frame"] == 120 and action["end_frame"] == 240
     expected = validation_expectation.build_expectation(csir, mapping)["audio_sections"][0]
     assert expected["source_offset_seconds"] == 0.5
+
+
+def test_signal_flags_and_binding_survive_as_nonexecutable_evidence():
+    csir, mapping = _fixture()
+    track = next(t for t in csir["tracks"] if t["ced_type"] == "event.trigger")
+    track.update(track_id="event-track", binding_entity_id="entity:prop")
+    section = track["sections"][0]
+    section.update(section_id="signal-occurrence", ced_type="event.trigger")
+    section["payload"]["signal"].update(emit_once=True, retroactive=False)
+    marker = next(a for a in csir_plan.build_plan(csir, mapping)["actions"] if a["kind"] == "marker")
+    assert marker["label"] == "Benchmark_Event_01"
+    assert marker["frame"] == 390
+    assert marker["event_source_evidence"] == {
+        "source_section_id": "signal-occurrence", "source_track_id": "event-track",
+        "source_binding_entity_id": "entity:prop", "source_section_type": "event.trigger",
+        "signal_asset_id": "signal", "signal_asset_resolved": True,
+        "emit_once": True, "retroactive": False,
+        "execution_status": "ANNOTATION_ONLY_CALLBACK_UNMAPPED",
+    }
+
+
+def test_missing_signal_asset_remains_unresolved_annotation():
+    csir, mapping = _fixture()
+    track = next(t for t in csir["tracks"] if t["ced_type"] == "event.trigger")
+    track["sections"][0]["payload"]["signal"]["signal_asset_id"] = "missing"
+    marker = next(a for a in csir_plan.build_plan(csir, mapping)["actions"] if a["kind"] == "marker")
+    assert marker["event_source_evidence"]["signal_asset_resolved"] is False
+    assert marker["event_source_evidence"]["emit_once"] is None
+    assert marker["event_source_evidence"]["execution_status"] == "ANNOTATION_ONLY_CALLBACK_UNMAPPED"
+
+
+@pytest.mark.parametrize("field,value", [("emit_once", "false"), ("retroactive", 1)])
+def test_invalid_signal_flags_are_not_coerced(field, value):
+    csir, mapping = _fixture()
+    track = next(t for t in csir["tracks"] if t["ced_type"] == "event.trigger")
+    track["sections"][0]["payload"]["signal"][field] = value
+    with pytest.raises(csir_plan.PlanError, match="Invalid source signal flag"):
+        csir_plan.build_plan(csir, mapping)

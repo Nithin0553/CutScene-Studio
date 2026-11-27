@@ -826,10 +826,12 @@ def compare(
         checks,
         "event.markers",
         "AUDIO_EVENT",
-        _status_from_bool(exp_markers == act_markers),
+        ("INCOMPLETE" if actual.get("markers_readback_complete") is False
+         else _status_from_bool(exp_markers == act_markers)),
         exp_markers,
         act_markers,
-        "Event/marker identity and timing must match exactly.",
+        "Event annotation identity and timing must match exactly; "
+        "this does not establish callback execution.",
     )
 
     passed = sum(1 for item in checks if item["status"] == "PASS")

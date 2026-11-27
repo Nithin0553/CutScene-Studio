@@ -485,3 +485,25 @@ def test_audio_source_trim_uses_native_ticks_and_occurrence_identity(case, expec
     trim = next(row for row in result["checks"] if row["id"].startswith("audio.source_trim."))
     assert trim["status"] == expected_status
     assert result["status"] == expected_status
+
+
+@pytest.mark.parametrize("case,status", [
+    ("unknown_empty", "INCOMPLETE"), ("unknown_expected", "INCOMPLETE"),
+    ("missing", "FAIL"), ("duplicate", "FAIL"), ("exact", "PASS"),
+])
+def test_marker_annotation_readback_distinguishes_unavailable_from_empty(case, status):
+    expected = _snapshot()
+    actual = copy.deepcopy(expected)
+    if case == "unknown_empty":
+        expected["markers"] = []
+    if case.startswith("unknown"):
+        actual["markers_readback_complete"] = False
+        actual["markers"] = []
+    elif case == "missing":
+        actual["markers"] = []
+        actual["markers_readback_complete"] = True
+    elif case == "duplicate":
+        actual["markers"].append(actual["markers"][0].copy())
+    result = core.compare(expected, actual)
+    row = next(item for item in result["checks"] if item["id"] == "event.markers")
+    assert row["status"] == status

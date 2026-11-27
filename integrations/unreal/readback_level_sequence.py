@@ -20,6 +20,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import audio_trim
+import event_marker
 import readback_math
 import unreal_compat
 
@@ -660,32 +661,9 @@ def _audio_section(section: Any) -> dict[str, Any]:
     }
 
 
-def _marked_frames(sequence: Any) -> list[dict[str, Any]]:
-    frames: list[Any] = []
-    getter = getattr(sequence, "get_marked_frames_from_sequence", None)
-    if callable(getter):
-        try:
-            frames = list(getter(unreal.MovieSceneTimeUnit.DISPLAY_RATE))
-        except Exception:
-            LOGGER.debug("Direct marked-frame accessor failed", exc_info=True)
-            frames = []
-    if not frames:
-        extensions = getattr(unreal, "MovieSceneSequenceExtensions", None)
-        extension_getter = (
-            getattr(extensions, "get_marked_frames_from_sequence", None)
-            if extensions else None
-        )
-        if callable(extension_getter):
-            frames = list(
-                extension_getter(sequence, unreal.MovieSceneTimeUnit.DISPLAY_RATE)
-            )
-
-    result: list[dict[str, Any]] = []
-    for marked in frames:
-        frame = _editor_property(marked, "frame_number")
-        label = _editor_property(marked, "label", "")
-        result.append({"frame": _frame_number_value(frame), "label": str(label)})
-    return result
+def _marked_frames(sequence: Any) -> list[dict[str, Any]] | None:
+    # get_marked_frames_from_sequence uses an explicit DISPLAY_RATE time unit.
+    return event_marker.read(sequence, unreal)
 
 
 def readback(
@@ -851,6 +829,7 @@ def readback(
             for section in _sections(track):
                 audio_sections.append(_audio_section(section))
 
+    markers = _marked_frames(sequence)
     audio_tick_resolution = None
     if audio_sections:
         try:
@@ -873,7 +852,8 @@ def readback(
         "bindings": list(binding_records.values()),
         "camera_cuts": camera_cuts,
         "audio_sections": audio_sections,
-        "markers": _marked_frames(sequence),
+        "markers": markers if markers is not None else [],
+        "markers_readback_complete": markers is not None,
     }
 
 

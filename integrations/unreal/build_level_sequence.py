@@ -93,8 +93,10 @@ def _load_asset(asset_path: str) -> unreal.Object:
 def _preflight(plan: dict[str, Any]) -> None:
     """Probe target capabilities and mappings before mutating actors or creating assets."""
     import audio_trim
+    import event_marker
 
     audio_trim.preflight(plan.get("actions", []), unreal)
+    event_marker.preflight(plan.get("actions", []), unreal)
     required_actions = {str(action["kind"]) for action in plan.get("actions", [])}
     try:
         unreal_compat.validate_runtime_capabilities(required_actions)
@@ -875,16 +877,9 @@ def _add_audio(sequence: unreal.LevelSequence, action: dict[str, Any]) -> None:
 
 
 def _add_marker(sequence: unreal.LevelSequence, action: dict[str, Any]) -> None:
-    marked = unreal.MovieSceneMarkedFrame()
-    marked.set_editor_property("frame_number", unreal.FrameNumber(int(action["frame"])))
-    marked.set_editor_property("label", str(action["label"]))
-    try:
-        unreal.MovieSceneSequenceExtensions.add_marked_frame_to_sequence(
-            sequence, marked, unreal.MovieSceneTimeUnit.DISPLAY_RATE
-        )
-    except AttributeError:
-        # ScriptMethod fallback for builds where the extension is exposed directly on the asset.
-        sequence.add_marked_frame(marked)
+    import event_marker
+
+    event_marker.add(sequence, action, unreal)
 
 
 def build(csir_path: str | os.PathLike[str], mapping_path: str | os.PathLike[str]) -> unreal.LevelSequence:

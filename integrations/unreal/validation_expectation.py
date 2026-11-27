@@ -159,6 +159,7 @@ def build_expectation(
             if name in bindings:
                 bindings[name]["tracks"].append({
                     "kind": "light_intensity",
+                    **({"sections": action["sections"]} if action.get("sections") else {}),
                     "keys": [
                         {"frame": int(key["frame"]), "value": float(key["value"])}
                         for key in action["keys"]

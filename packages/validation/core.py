@@ -643,7 +643,7 @@ def compare(
                         )
 
             elif kind == "light_intensity":
-                match = candidates[0] if candidates else None
+                match = candidates[0] if len(candidates) == 1 else None
                 _check(
                     checks,
                     f"light.intensity_track.{name}",
@@ -651,9 +651,41 @@ def compare(
                     _status_from_bool(match is not None),
                     True,
                     match is not None,
-                    "A mapped native Unreal light-intensity curve must be present.",
+                    "Exactly one mapped native Unreal light-intensity track must be present.",
                 )
-                if match is not None:
+                if match is not None and exp_track.get("sections"):
+                    expected_sections = exp_track["sections"]
+                    actual_sections = match.get("sections")
+                    if not isinstance(actual_sections, list):
+                        section_status = "INCOMPLETE"
+                    elif len(actual_sections) != len(expected_sections):
+                        section_status = "FAIL"
+                    else:
+                        section_status = "PASS"
+                        for exp_section, act_section in zip(expected_sections, actual_sections):
+                            if any(exp_section[field] != act_section.get(field)
+                                   for field in ("start_frame", "end_frame")):
+                                section_status = "FAIL"
+                                break
+                            expected_keys = exp_section["keys"]
+                            observed_keys = act_section.get("keys", [])
+                            if (len(expected_keys) != len(observed_keys)
+                                    or any(
+                                        a["frame"] != z.get("frame")
+                                        or not isinstance(z.get("value"), (int, float))
+                                        or not math.isfinite(z["value"])
+                                        or abs(a["value"] - z["value"]) > 1e-4
+                                        for a, z in zip(expected_keys, observed_keys)
+                                    )):
+                                section_status = "FAIL"
+                                break
+                    _check(
+                        checks, f"light.intensity_sections.{name}", "LIGHT", section_status,
+                        expected_sections, actual_sections,
+                        "Native light clip ranges and numeric keys must match independently; "
+                        "gap evaluation, completion behavior and photometric output are unverified.",
+                    )
+                elif match is not None:
                     source_keys = list(exp_track.get("keys", []))
                     target_keys = list(match.get("keys", []))
                     same_frames = (

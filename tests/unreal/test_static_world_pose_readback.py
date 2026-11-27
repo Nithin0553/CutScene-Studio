@@ -101,3 +101,25 @@ def test_audio_easing_native_readback_does_not_invent_values(monkeypatch, value,
     spec.loader.exec_module(module)
     assert module._audio_easing_frames(object(), "in") == expected
     assert module._audio_easing_frames(object(), "out") is None
+
+
+def test_native_light_readback_preserves_section_boundaries(monkeypatch):
+    fake = types.ModuleType("unreal")
+    compat = types.ModuleType("unreal_compat")
+    compat.get_section_channels = lambda section: [section]
+    monkeypatch.setitem(sys.modules, "unreal", fake)
+    monkeypatch.setitem(sys.modules, "unreal_compat", compat)
+    file = Path(__file__).resolve().parents[2] / "integrations/unreal/readback_level_sequence.py"
+    spec = importlib.util.spec_from_file_location("_light_sections_reader_test", file)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "_track_display_name", lambda track: "CutSceneAI Light Intensity")
+    monkeypatch.setattr(module, "_sections", lambda track: [(48, 72), (0, 24)])
+    monkeypatch.setattr(module, "_section_range", lambda section: section)
+    monkeypatch.setattr(module, "_key_map", lambda channel: {
+        channel[0]: 1.0, channel[1]: 2.0})
+    result = module._light_intensity_track(object())
+    assert [(row["start_frame"], row["end_frame"]) for row in result["sections"]] == [
+        (0, 24), (48, 72)]
+    assert result["sections"][1]["keys"][0] == {"frame": 48, "value": 1.0}

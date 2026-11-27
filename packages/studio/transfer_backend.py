@@ -749,6 +749,10 @@ def compose(
     # Unreal builder action. Reject unimplemented action kinds now, before
     # preparing immutable artifacts or opening the target editor.
     try:
+        csir_plan.validate_light_writers(plan["actions"])
+    except csir_plan.PlanError as exc:
+        raise TransferBackendError(str(exc)) from exc
+    try:
         feature_dispatch.verify_executable_actions(plan)
     except feature_dispatch.FeatureDispatchError as exc:
         raise TransferBackendError(str(exc)) from exc

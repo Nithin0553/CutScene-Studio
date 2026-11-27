@@ -596,18 +596,24 @@ def _light_intensity_track(track: Any) -> dict[str, Any] | None:
     """Read the native Unreal numeric intensity curve, not camera FOV."""
     if _track_display_name(track) != "CutSceneAI Light Intensity":
         return None
-    sections = _sections(track)
-    if len(sections) != 1:
-        raise UnrealReadbackError("Expected one light-intensity track section.")
-    channels = unreal_compat.get_section_channels(sections[0])
-    if len(channels) != 1:
-        raise UnrealReadbackError("Expected one light-intensity channel.")
+    sections = []
+    for section in _sections(track):
+        start, end = _section_range(section)
+        channels = unreal_compat.get_section_channels(section)
+        if len(channels) != 1:
+            raise UnrealReadbackError("Expected one light-intensity channel.")
+        sections.append({
+            "start_frame": start, "end_frame": end,
+            "keys": [
+                {"frame": int(frame), "value": float(value)}
+                for frame, value in sorted(_key_map(channels[0]).items())
+            ],
+        })
+    sections.sort(key=lambda item: (item["start_frame"], item["end_frame"]))
     return {
         "kind": "light_intensity",
-        "keys": [
-            {"frame": int(frame), "value": float(value)}
-            for frame, value in sorted(_key_map(channels[0]).items())
-        ],
+        "sections": sections,
+        "keys": [key for item in sections for key in item["keys"]],
     }
 
 

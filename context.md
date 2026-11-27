@@ -83,6 +83,13 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-27 — Event annotation regression verified; bounded light intensity sections
+
+- Owner confirmed c678114: all Ruff checks passed and 205 targeted Python tests passed (duration not supplied). Prior audio regression 181 in 16.97 s, host/provider 252 in 123.29 s, Node 23. These overlap and are not a full-suite count. Draft PR #1 open.
+- Audited lighting extractor, CED, automatic light classes, deterministic intensity planner/builder, capture fallback and native validation. Old planner emitted one full-sequence property writer per source clip, which could compete. Now one intensity action per source track with sorted, bounded nonoverlapping native sections; retain flattened keys for legacy consumers; source trim/speed respected. Reject overlapping/eased, empty, ambiguous, malformed or subframe clips rather than guessing their evaluated intensity; existing CineTwin fallback can provide sampled numeric values in best-effort mode. Duplicate target intensity writers are rejected in direct planner and final Studio compose; native preflight checks again. Existing capture-baked single-track behavior unchanged.
+- Native builder sets each bounded section's range and restore-state completion policy, with capability gate; readback preserves independently observed section ranges and keys. Validator rejects duplicate tracks, mismatching ranges/keys and extra sections; missing section evidence is INCOMPLETE. This is numeric curve/timing coverage, not proof of rendered brightness, physical units, base-light gap behavior, native completion semantics, color, shadow or falloff. CED lighting stays partial. Existing evidence untouched; changed source-derived plans require fresh preparation.
+- Added 19 software cases: 12 planner, six validator and one mocked readback. No local tests or native execution run remotely. Rerun the 205-test suite (expected 224 if unchanged) plus host authorization/preflight and full suite as needed. Ruff on changed previously-clean planner/readback/expectation/preflight/validation/tests; builder and transfer_backend have historical lint debt, not addressed wholesale. Keep engines/Ollama closed. Next audit static light source properties and remaining animation/material adapters; bounded CineTwin repair still pending.
+
 ### 2026-11-27 — Audio trim regression verified; source signal evidence and marker adapter
 
 - Owner confirmed at b293b08: Ruff all checks passed; expanded conversion/validation regression 181 passed in 16.97 s. Prior host/provider suite 252 passed in 123.29 s; Node 23 scenarios. These are separate targeted suites, not additive full-suite counts. Draft PR #1 remains open.

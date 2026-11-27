@@ -97,6 +97,12 @@ def _preflight(plan: dict[str, Any]) -> None:
 
     audio_trim.preflight(plan.get("actions", []), unreal)
     event_marker.preflight(plan.get("actions", []), unreal)
+    csir_plan.validate_light_writers(plan.get("actions", []))
+    if any(a.get("kind") == "light_intensity" and a.get("sections")
+           for a in plan.get("actions", [])):
+        mode = getattr(unreal, "MovieSceneCompletionMode", None)
+        if getattr(mode, "RESTORE_STATE", None) is None:
+            raise UnrealBuildError("Native light section restore-state mode unavailable.")
     required_actions = {str(action["kind"]) for action in plan.get("actions", [])}
     try:
         unreal_compat.validate_runtime_capabilities(required_actions)
@@ -699,13 +705,20 @@ def _add_light_intensity(sequence: unreal.LevelSequence, actor: unreal.Actor, ac
     track = binding.add_track(unreal.MovieSceneFloatTrack)
     track.set_display_name("CutSceneAI Light Intensity")
     track.set_property_name_and_path("Intensity", "Intensity")
-    section = track.add_section()
-    section.set_range(0, sequence.get_playback_end())
-    channels = unreal_compat.get_section_channels(section)
-    if len(channels) != 1:
-        raise UnrealBuildError("Light intensity requires exactly one float channel.")
-    for key in action["keys"]:
-        unreal_compat.add_linear_channel_key(channels[0], int(key["frame"]), float(key["value"]))
+    bounded = action.get("sections")
+    sections = bounded or [{
+        "start_frame": 0, "end_frame": sequence.get_playback_end(), "keys": action["keys"],
+    }]
+    for item in sections:
+        section = track.add_section()
+        section.set_range(int(item["start_frame"]), int(item["end_frame"]))
+        if bounded:
+            unreal_compat.set_section_completion_mode(section, "restore_state")
+        channels = unreal_compat.get_section_channels(section)
+        if len(channels) != 1:
+            raise UnrealBuildError("Light intensity requires exactly one float channel.")
+        for key in item["keys"]:
+            unreal_compat.add_linear_channel_key(channels[0], int(key["frame"]), float(key["value"]))
 
 
 

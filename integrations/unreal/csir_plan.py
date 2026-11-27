@@ -752,6 +752,59 @@ def _transform_action(
 
 
 
+def validate_light_writers(actions: list[dict[str, Any]]) -> None:
+    """A light component may have only one native intensity writer."""
+    labels: set[str] = set()
+    for action in actions:
+        if action.get("kind") != "light_intensity":
+            continue
+        label = str(action["actor_label"])
+        if label in labels:
+            raise PlanError("Multiple light intensity writers for target actor: " + label)
+        labels.add(label)
+
+
+def _light_intensity_sections(track, entity, fps_n, fps_d):
+    """Build bounded, nonoverlapping intensity sections from source clip timing."""
+    sections = []
+    for section in track.get("sections", []):
+        curves = [
+            curve for curve in section.get("payload", {}).get("animation", {}).get("curves", [])
+            if str(curve.get("canonical_semantic", "")) == "light.intensity"
+            or str(curve.get("property_name", "")).lower() in {"m_intensity", "intensity"}
+        ]
+        if len(curves) != 1 or not curves[0].get("keys"):
+            raise PlanError(f"Light animation on {entity['name']} needs one populated intensity curve.")
+        start = rational_seconds(section["start"])
+        end = rational_seconds(section["end"])
+        offset = rational_seconds(section.get(
+            "source_offset", {"value": 0, "rate": {"numerator": 1, "denominator": 1}}))
+        speed = float(section.get("time_scale", 1.0))
+        if (not all(math.isfinite(value) for value in (start, end, offset, speed))
+                or start < 0 or end <= start or offset < 0 or speed <= 0):
+            raise PlanError("Invalid light animation clip timing.")
+        native = section.get("native_payload") or {}
+        if any(timeline_clip_easing_seconds(native, side) > 0 for side in ("in", "out")):
+            raise PlanError("Light clip easing requires evaluated source intensity evidence.")
+        first = seconds_to_frame(start, fps_n, fps_d)
+        last = seconds_to_frame(end, fps_n, fps_d)
+        if first >= last:
+            raise PlanError("Light animation clip is shorter than one target frame.")
+        keys = []
+        for frame in range(first, last + 1):
+            time = min(end, max(start, frame * fps_d / fps_n))
+            value = _curve_value(curves[0], offset + (time - start) * speed)
+            if not math.isfinite(value) or value < 0:
+                raise PlanError("Light intensity must be finite and nonnegative.")
+            keys.append({"frame": frame, "value": value})
+        sections.append((start, end, {"start_frame": first, "end_frame": last, "keys": keys}))
+    sections.sort(key=lambda entry: (entry[0], entry[1]))
+    for left, right in pairwise(sections):
+        if left[1] > right[0] or left[2]["end_frame"] > right[2]["start_frame"]:
+            raise PlanError("Overlapping light clips require evaluated source intensity evidence.")
+    return [entry[2] for entry in sections]
+
+
 def build_plan(csir: dict[str, Any], mapping: dict[str, Any]) -> dict[str, Any]:
     if csir.get("schema_version") != "0.1.0":
         raise PlanError(f"Unsupported CSIR schema: {csir.get('schema_version')}")
@@ -951,31 +1004,16 @@ def build_plan(csir: dict[str, Any], mapping: dict[str, Any]) -> dict[str, Any]:
                 )
 
         elif ced_type == "light.animation" and entity:
-            actor_label = _mapping_actor(mapping, entity["name"])
-            for section in track.get("sections", []):
-                intensity = next((
-                    curve for curve in section.get("payload", {}).get("animation", {}).get("curves", [])
-                    if str(curve.get("canonical_semantic", "")) == "light.intensity"
-                    or str(curve.get("property_name", "")).lower() in {"m_intensity", "intensity"}
-                ), None)
-                if intensity is None:
-                    raise PlanError(f"Light animation on {entity['name']} has no transferable intensity curve.")
-                start = rational_seconds(section["start"])
-                end = rational_seconds(section["end"])
-                offset = rational_seconds(section.get(
-                    "source_offset", {"value": 0, "rate": {"numerator": 1, "denominator": 1}}))
-                speed = float(section.get("time_scale", 1.0))
-                by_frame: dict[int, dict[str, float | int]] = {}
-                for frame in range(seconds_to_frame(start, fps_n, fps_d),
-                                   seconds_to_frame(end, fps_n, fps_d) + 1):
-                    time = frame * fps_d / fps_n
-                    source_time = offset + (time - start) * speed
-                    by_frame[frame] = {"frame": frame, "value": _curve_value(intensity, source_time)}
+            sections = _light_intensity_sections(track, entity, fps_n, fps_d)
+            if sections:
                 plan["actions"].append({
                     "kind": "light_intensity",
                     "entity_name": entity["name"],
-                    "actor_label": actor_label,
-                    "keys": list(by_frame.values()),
+                    "actor_label": _mapping_actor(mapping, entity["name"]),
+                    "sections": sections,
+                    # Retain flattened keys for legacy consumers; bounded sections
+                    # are authoritative, including two keys at a shared boundary.
+                    "keys": [key for item in sections for key in item["keys"]],
                 })
 
         elif ced_type == "audio.track":
@@ -1044,6 +1082,7 @@ def build_plan(csir: dict[str, Any], mapping: dict[str, Any]) -> dict[str, Any]:
             clip["completion_mode"] = "project_default"
             clip["hold_strategy"] = "next_source_clip_controls_pose"
 
+    validate_light_writers(plan["actions"])
     return plan
 
 

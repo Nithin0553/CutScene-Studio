@@ -282,3 +282,70 @@ def test_skeletal_plan_normalizes_unset_unity_blend_before_runtime():
     )
     assert updated["blend_in_seconds"] == 0.25
     assert updated["blend_out_seconds"] == 0.4
+
+
+def _light_document(sections):
+    doc = document(sections)
+    doc["entities"][0]["ced_type"] = "entity.light"
+    doc["tracks"][0]["ced_type"] = "light.animation"
+    return doc
+
+
+@pytest.mark.parametrize("second_start", [1.0, 2.0])
+def test_light_clips_compile_to_one_bounded_writer(second_start):
+    first = section(0, 1, [curve("light.intensity", [(0, 2), (1, 6)])])
+    second = section(second_start, second_start + 1,
+                     [curve("light.intensity", [(0, 10), (1, 12)])])
+    doc = _light_document([second, first])
+    actions = [a for a in csir_plan.build_plan(doc, mapped())["actions"]
+               if a["kind"] == "light_intensity"]
+    assert len(actions) == 1
+    clips = actions[0]["sections"]
+    assert [(a["start_frame"], a["end_frame"]) for a in clips] == [
+        (0, 24), (round(second_start * 24), round((second_start + 1) * 24))]
+    assert clips[0]["keys"][-1]["value"] == 6
+    assert clips[1]["keys"][0]["value"] == 10
+    import validation_expectation
+
+    expected = validation_expectation.build_expectation(doc, mapped())
+    assert expected["bindings"][0]["tracks"][0]["sections"] == clips
+
+
+def test_light_clip_source_trim_and_speed_are_used_independently():
+    item = section(1, 2, [curve("light.intensity", [(0, 0), (4, 4)])])
+    item.update(source_offset=rt(0.5), time_scale=2.0)
+    action = csir_plan.build_plan(_light_document([item]), mapped())["actions"][0]
+    assert action["sections"][0]["keys"][0] == {"frame": 24, "value": 0.5}
+    assert action["sections"][0]["keys"][-1] == {"frame": 48, "value": 2.5}
+
+
+@pytest.mark.parametrize("case", ["overlap", "empty", "duplicate_curve", "negative_value",
+                                  "nonfinite_value", "bad_speed", "ease", "subframe"])
+def test_unrepresentable_light_clip_is_not_silently_planned(case):
+    item = section(0, 1, [curve("light.intensity", [(0, 2), (1, 6)])])
+    items = [item]
+    curves = item["payload"]["animation"]["curves"]
+    if case == "overlap":
+        items.append(section(0.5, 2, curves))
+    elif case == "empty":
+        curves[0]["keys"] = []
+    elif case == "duplicate_curve":
+        curves.append(curves[0])
+    elif case in {"negative_value", "nonfinite_value"}:
+        curves[0]["keys"][0]["value"] = -1 if case == "negative_value" else float("nan")
+    elif case == "bad_speed":
+        item["time_scale"] = 0
+    elif case == "ease":
+        item["native_payload"] = {"ease_in_seconds": 0.25}
+    else:
+        item["end"] = rt(0.001)
+    with pytest.raises(csir_plan.PlanError):
+        csir_plan.build_plan(_light_document(items), mapped())
+
+
+def test_light_multiple_source_tracks_cannot_write_same_target_intensity():
+    item = section(0, 1, [curve("light.intensity", [(0, 2), (1, 6)])])
+    doc = _light_document([item])
+    doc["tracks"].append(dict(doc["tracks"][0]))
+    with pytest.raises(csir_plan.PlanError, match="Multiple light intensity writers"):
+        csir_plan.build_plan(doc, mapped())

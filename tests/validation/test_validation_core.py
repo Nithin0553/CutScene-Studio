@@ -507,3 +507,38 @@ def test_marker_annotation_readback_distinguishes_unavailable_from_empty(case, s
     result = core.compare(expected, actual)
     row = next(item for item in result["checks"] if item["id"] == "event.markers")
     assert row["status"] == status
+
+
+@pytest.mark.parametrize("case,status", [
+    ("match", "PASS"), ("wrong_range", "FAIL"), ("wrong_value", "FAIL"),
+    ("missing", "INCOMPLETE"), ("extra_section", "FAIL"), ("competing_track", "FAIL"),
+])
+def test_bounded_light_intensity_sections_require_independent_range_readback(case, status):
+    expected = _snapshot()
+    sections = [
+        {"start_frame": 0, "end_frame": 24, "keys": [
+            {"frame": 0, "value": 2.0}, {"frame": 24, "value": 6.0}]},
+        {"start_frame": 48, "end_frame": 72, "keys": [
+            {"frame": 48, "value": 10.0}, {"frame": 72, "value": 12.0}]},
+    ]
+    expected["bindings"].append({
+        "name": "LIGHT_KEY", "binding_id": "light",
+        "tracks": [{"kind": "light_intensity", "sections": sections}],
+    })
+    actual = copy.deepcopy(expected)
+    tracks = actual["bindings"][-1]["tracks"]
+    if case == "wrong_range":
+        tracks[0]["sections"][1]["start_frame"] = 24
+    elif case == "wrong_value":
+        tracks[0]["sections"][1]["keys"][0]["value"] = 6.0
+    elif case == "missing":
+        tracks[0].pop("sections")
+    elif case == "extra_section":
+        tracks[0]["sections"].append(sections[0])
+    elif case == "competing_track":
+        tracks.append(copy.deepcopy(tracks[0]))
+    result = core.compare(expected, actual)
+    check_id = ("light.intensity_track.LIGHT_KEY" if case == "competing_track"
+                else "light.intensity_sections.LIGHT_KEY")
+    row = next(item for item in result["checks"] if item["id"] == check_id)
+    assert row["status"] == status

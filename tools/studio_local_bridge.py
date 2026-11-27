@@ -197,6 +197,61 @@ def companion_upgrade_action(reason: str) -> str:
 AI_PREFLIGHT_MAX_AGE_SECONDS = 120
 
 
+def request_ai_native_preflight(candidate_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
+    """Submit a bounded read-only request, never an execution job."""
+    active_path = folder / 'active-candidate.json'
+    connection_path = folder / 'connection.json'
+    active_bytes = active_path.read_bytes()
+    connection_bytes = connection_path.read_bytes()
+    active = json.loads(active_bytes.decode('utf-8-sig'))
+    config = json.loads(connection_bytes.decode('utf-8-sig'))
+    if (not candidate_id.isascii() or not candidate_id.replace('_', '').isalnum()
+            or candidate_id != active.get('candidate_id') or not active.get('ai_analysis')):
+        raise ValueError('Select the current AI candidate first.')
+    if config.get('source_rights_confirmed') is not True:
+        raise ValueError('Confirm source asset-copy rights first.')
+    if (folder / 'active-job.json').exists():
+        raise ValueError('A job is already active.')
+    if not active.get('automatic_setup', {}).get('ready'):
+        raise ValueError('Automatic asset setup is not ready.')
+    worker = worker_connected(folder)
+    if not worker.get('connected') or not worker.get('worker_instance_id'):
+        raise ValueError('Connect the current Unreal companion first.')
+    stale = worker_code_mismatch(worker)
+    if stale:
+        raise ValueError(stale)
+    if (os.path.normcase(str(worker.get('project') or '')) != os.path.normcase(config['target_project'])
+            or worker.get('level') != config['level_path']):
+        raise ValueError('Open the selected existing staging level first.')
+    request_path = folder / 'ai-native-preflight-request.json'
+    if request_path.is_file():
+        prior = load_json(request_path)
+        age = (datetime.now(UTC) - datetime.fromisoformat(prior['requested_at'])).total_seconds()
+        response_path = folder / 'ai-native-preflight-response.json'
+        response = load_json(response_path) if response_path.is_file() else {}
+        if (0 <= age < AI_PREFLIGHT_MAX_AGE_SECONDS
+                and prior.get('worker_instance_id') == worker['worker_instance_id']
+                and response.get('request_id') != prior.get('request_id')
+                and prior.get('candidate_record_sha256') == hashlib.sha256(active_bytes).hexdigest()
+                and prior.get('connection_sha256') == hashlib.sha256(connection_bytes).hexdigest()):
+            return {'status': 'AI_NATIVE_PREFLIGHT_REQUESTED', 'request_id': prior['request_id'],
+                    'execution_authorized': False}
+    request = {
+        'kind': 'cutsceneai.studio.ai_native_preflight_request',
+        'request_id': uuid.uuid4().hex, 'candidate_id': candidate_id,
+        'worker_instance_id': worker['worker_instance_id'],
+        'worker_source_sha256': worker['worker_source_sha256'],
+        'candidate_record_sha256': hashlib.sha256(active_bytes).hexdigest(),
+        'connection_sha256': hashlib.sha256(connection_bytes).hexdigest(),
+        'requested_at': datetime.now(UTC).isoformat(),
+    }
+    # Invalidate old reports before publishing the new request.
+    (folder / 'ai-native-preflight.json').unlink(missing_ok=True)
+    atomic_json(request_path, request)
+    return {'status': 'AI_NATIVE_PREFLIGHT_REQUESTED', 'request_id': request['request_id'],
+            'execution_authorized': False}
+
+
 def ai_native_preflight_status(folder: Path = WORKSPACE) -> dict[str, Any]:
     """Check a saved read-only inspection, never authorize or queue work.
 
@@ -236,7 +291,27 @@ def ai_native_preflight_status(folder: Path = WORKSPACE) -> dict[str, Any]:
         candidate = (root / candidate_id).resolve()
         if candidate.parent != root or candidate != Path(active['candidate_dir']).resolve():
             return blocked('Active candidate directory differs from the workspace.')
+        request_path = folder / 'ai-native-preflight-request.json'
+        request = load_json(request_path) if request_path.is_file() else None
+        if request is not None:
+            request_age = (datetime.now(UTC) - datetime.fromisoformat(request['requested_at'])).total_seconds()
+            if (request.get('worker_instance_id') != worker.get('worker_instance_id')
+                    or request.get('candidate_record_sha256') != active_hash
+                    or request.get('connection_sha256') != config_hash):
+                return blocked('Inspection request no longer matches the active editor or candidate.')
+            response_path = folder / 'ai-native-preflight-response.json'
+            response = load_json(response_path) if response_path.is_file() else {}
+            if response.get('request_id') != request.get('request_id'):
+                if not 0 <= request_age < AI_PREFLIGHT_MAX_AGE_SECONDS:
+                    return blocked('Inspection request expired; request a new inspection.')
+                return {'status': 'AI_NATIVE_PREFLIGHT_REQUESTED', 'verified': False,
+                        'execution_authorized': False, 'request_id': request['request_id'],
+                        'reason': 'Waiting for read-only Unreal inspection.'}
+            if response.get('status') != 'AI_NATIVE_PREFLIGHT_COMPLETED':
+                return blocked(str(response.get('reason') or 'Native inspection failed.'))
         report = load_json(folder / 'ai-native-preflight.json')
+        if request is not None and report.get('request_id') != request.get('request_id'):
+            return blocked('Native report belongs to a different request.')
         age = (datetime.now(UTC) - datetime.fromisoformat(report['checked_at'])).total_seconds()
         if (report.get('kind') != 'cutsceneai.studio.ai_native_preflight'
                 or report.get('status') != 'AI_NATIVE_SETUP_PREFLIGHT_PASSED'
@@ -871,7 +946,8 @@ def create_handler(webroot: Path, folder: Path = WORKSPACE):
                     200, studio_ui_features.verification(folder, active, load_json(job_file))
                 )
             if path == '/api/ai-native-preflight':
-                return self.reply(200, ai_native_preflight_status(folder))
+                with LOCK:
+                    return self.reply(200, ai_native_preflight_status(folder))
             if path == '/api/status':
                 cfg = folder / 'connection.json'
                 return self.reply(200, {'service': 'CutSceneAI Studio Local Companion',
@@ -988,6 +1064,8 @@ def create_handler(webroot: Path, folder: Path = WORKSPACE):
                             (folder / name).unlink(missing_ok=True)
                     elif route == '/api/prepare':
                         result = prepare(folder, data)
+                    elif route == '/api/ai-native-preflight':
+                        result = request_ai_native_preflight(str(data.get('candidate_id', '')), folder)
                     elif route == '/api/approve-one-click':
                         result = approve_one_click(
                             str(data.get('candidate_id', '')), folder)

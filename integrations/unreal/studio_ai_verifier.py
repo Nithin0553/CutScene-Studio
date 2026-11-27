@@ -6,6 +6,7 @@ This verifies saved evidence, not approval or native fidelity.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
 import sys
@@ -43,7 +44,10 @@ def verify_candidate(
     session = prepared_transfer.verify(folder)
     if not session.get("ai_analysis"):
         raise ValueError("Expected an AI-assisted prepared candidate.")
-    handoff = json.loads((folder / "ai-handoff.json").read_text(encoding="utf-8-sig"))
+    handoff_bytes = (folder / "ai-handoff.json").read_bytes()
+    if hashlib.sha256(handoff_bytes).hexdigest() != session["artifact_sha256"]["ai-handoff.json"]:
+        raise ValueError("AI handoff changed after replay.")
+    handoff = json.loads(handoff_bytes.decode("utf-8-sig"))
     proposed = [row for row in handoff["tracks"] if row["ai_status"] == "proposed"]
     if any(row["proposal_attributed"] is not True for row in proposed):
         raise ValueError("An AI proposal is not attributed to the verified plan.")

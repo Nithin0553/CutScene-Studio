@@ -219,3 +219,60 @@ def test_worker_checks_ai_replay_and_blocks_before_native_mutation():
     ) < segment.index(
         "AI evidence verified; native AI execution is not enabled yet."
     ) < segment.index("\n    _ensure_target_level(job)")
+
+
+@pytest.mark.parametrize("case", ["available", "isolated", "empty", "cached_foreign"])
+def test_ai_dependency_bootstrap_is_local_and_fail_closed(tmp_path, case):
+    script = f"""
+import sys
+from pathlib import Path
+from types import ModuleType
+
+root = Path({str(ROOT)!r})
+sys.path.insert(0, str(root / 'integrations/unreal'))
+import studio_planner_sync as sync
+
+case = {case!r}
+bundle = Path.cwd() / 'runtime-dependencies' / 'unreal-python311'
+bundle.mkdir(parents=True)
+sync._runtime_dependency_path = lambda: bundle
+assert sync.find_spec('jsonschema') is None
+
+if case == 'available':
+    existing = Path.cwd() / 'existing'
+    existing.mkdir()
+    (existing / 'jsonschema.py').write_text('MARKER = 1')
+    sys.path.insert(0, str(existing))
+    assert sync.configure_ai_dependencies() is None
+    assert str(bundle) not in sys.path
+elif case == 'isolated':
+    (bundle / 'jsonschema.py').write_text('MARKER = 2')
+    assert sync.configure_ai_dependencies() == bundle.resolve()
+    assert sys.path[0] == str(bundle.resolve())
+    import jsonschema
+    assert jsonschema.MARKER == 2
+    assert sync.configure_ai_dependencies() is None
+    assert sys.path.count(str(bundle.resolve())) == 1
+else:
+    if case == 'cached_foreign':
+        (bundle / 'jsonschema.py').write_text('MARKER = 3')
+        foreign = ModuleType('rpds')
+        foreign.__file__ = str(Path.cwd() / 'foreign.py')
+        sys.modules['rpds'] = foreign
+    try:
+        sync.configure_ai_dependencies()
+    except sync.PlannerSyncError as exc:
+        assert ('already loaded outside' if case == 'cached_foreign'
+                else 'no usable jsonschema') in str(exc)
+    else:
+        raise AssertionError('Unsafe dependency bundle was accepted')
+    assert str(bundle.resolve()) not in sys.path
+    assert 'jsonschema' not in sys.modules
+print('DEPENDENCY_BOOTSTRAP_CHECKED')
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", script], cwd=tmp_path,
+        text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "DEPENDENCY_BOOTSTRAP_CHECKED" in result.stdout

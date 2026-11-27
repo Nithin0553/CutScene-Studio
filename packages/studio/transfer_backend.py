@@ -929,14 +929,14 @@ def compose_files(
     return plan, report, evidence
 
 
-def inspect_ai_handoff(
+def compose_ai_handoff(
     csir_path: str | Path,
     mapping_path: str | Path,
     analysis_path: str | Path,
     *,
     capture_path: str | Path | None = None,
-) -> dict[str, Any]:
-    """Compare source-bound AI proposals with the existing deterministic plan.
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, str], dict[str, Any]]:
+    """Compose the existing plan and compare source-bound AI proposals.
 
     This inspection never changes a prepared plan, queues a job or authorizes
     execution. The analysis is advisory and must match current source evidence.
@@ -1070,7 +1070,7 @@ def inspect_ai_handoff(
             "proposal_attributed": selected in matched if selected else None,
             "backend_details": ledger["details"],
         })
-    return {
+    inspection = {
         "kind": "cutsceneai.ai_handoff_inspection",
         "version": "0.1.0",
         "source_sha256": source.source_sha256,
@@ -1083,3 +1083,18 @@ def inspect_ai_handoff(
         "execution_authorized": False,
         "behavioral_fidelity_established": False,
     }
+    return plan, coverage, evidence, inspection
+
+
+def inspect_ai_handoff(
+    csir_path: str | Path,
+    mapping_path: str | Path,
+    analysis_path: str | Path,
+    *,
+    capture_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Read-only inspection using the same composition as candidate preparation."""
+    _, _, _, inspection = compose_ai_handoff(
+        csir_path, mapping_path, analysis_path, capture_path=capture_path,
+    )
+    return inspection

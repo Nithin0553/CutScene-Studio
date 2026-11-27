@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Live Studio strict source census blocked before AI inference
+
+- Owner supplied screenshot of the actual Studio AI preparation screen. Strict source census blocked two component/scope findings: UnityEngine.AudioListener on CAM_A_Wide and CAM_B_Close, each NATIVE_COMPONENT_EXTRACTION_OR_ADAPTER_REQUIRED. Ten native source snapshots are recorded as partial (collision, URP and signal behavior Unreal-unverified). UI explicitly reports no Unreal assets modified and offers Prepare supported parts, confirming AI mode is selected. No model inference or candidate preparation success established yet.
+- For the current preparation-only milestone, owner may explicitly choose Prepare supported parts after reviewing these findings; preserve both missing AudioListener entries and partial snapshots as limitations. Do not suppress census checks or claim listener equivalence. AudioListener source extraction and target behavioral adapter/validation remain future fidelity work. No application code changed. Next inspect live AI preparation result or exact error and saved report; native execution remains blocked. Full Python baseline 804 passed / 7 known external skips, UI 18 scenarios passed.
+
 ### 2026-11-26 — All 18 cinematic UI regression scenarios passed
 
 - Owner confirmed the corrected Node mock-backend suite passed all 18 scenarios, including AI preparation-only, explicit fresh deterministic recovery, no replay, failure handling, native errors and Home-first startup. Latest Python baseline remains 804 passed / seven known external Stage 4 skips. Post-correction Ruff output not explicitly supplied. No application changes in this checkpoint.

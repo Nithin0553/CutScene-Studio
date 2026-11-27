@@ -83,6 +83,12 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-26 — Restored AI UI regression polling correction
+
+- Owner reported Node assertion failure in testRestoredAIPlanNeverAutoQueues, line 525, expected one /api/execute call but observed zero after explicitly switching to a fresh deterministic candidate. Inspected current cinematic.js and harness: start() invokes advance() while action holds busy, so actual submission is deferred to next status poll, as in existing deterministic and restored-pending tests. The new test omitted that poll. No application/native execution failure established by this mock test.
+- Corrected test sequencing (4e5dda7): assert exactly one reconnect, preparation and approval for the fresh deterministic candidate, poll before expecting execution, check exact new candidate ID and approval-before-execution order, then poll again and ensure no replay. Existing no-native-call assertions for restored AI candidate remain. No production code or approval/readiness safeguards changed.
+- Next: fetch/fast-forward and rerun node --check apps/studio-web/cinematic.js and node tests/studio/test_cinematic_ui.cjs; expect 18 scenarios passing. Corrected suite not run here. Full Python baseline remains 804 passed / 7 known external Stage 4 skips. Previous corrected Ruff result not supplied. Live host/UI analysis and native verifier integration remain pending. Draft PR #1 remains open; no previous head PR workflow runs returned.
+
 ### 2026-11-26 — Full 804-test baseline restored; cinematic UI AI opt-in
 
 - Owner reported targeted 90 passed in 20.87 s and full 804 passed, 7 skipped in 118.36 s. All skips are the original external Stage 4 benchmark fixtures; no new skip or failure. This verifies mixed-suite planner resolution and host regression including AI preparation with mocked inference. Post-cleanup Ruff output was not supplied, so lint is not certified yet. Actual live host inference remains unverified.

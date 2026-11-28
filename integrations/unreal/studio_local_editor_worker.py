@@ -292,8 +292,12 @@ def _execute(job):
     # Re-audit after each change and stop on no progress, a source mismatch,
     # or the hard two-round cap. Other domains are not safely auto-repairable.
     repairs = []
-    if visual_report is not None and job.get('automatic_setup'):
-        previous_fallback = int(visual_report.get('material_slots_engine_default', 0))
+    # AI execution approval authorizes the prepared transfer, not subsequent
+    # in-place repairs. The host may request a separate advisory decision.
+    if ai:
+        job['repair_status'] = 'AI_REPAIR_REVIEW_REQUIRED'
+    if visual_report is not None and job.get('automatic_setup') and not ai:
+        previous_fallback = int(visual_report.get('material_slots_engine_default', 0)) + int(visual_report.get('material_slots_empty', 0))
         for _ in range(2):
             if previous_fallback <= 0:
                 break
@@ -308,7 +312,7 @@ def _execute(job):
                 import studio_visual_audit
                 refreshed = studio_visual_audit.audit_latest(WORKSPACE, api=unreal)
                 visual_report = refreshed
-                current_fallback = int(refreshed.get('material_slots_engine_default', 0))
+                current_fallback = int(refreshed.get('material_slots_engine_default', 0)) + int(refreshed.get('material_slots_empty', 0))
                 if current_fallback >= previous_fallback:
                     break
                 previous_fallback = current_fallback
@@ -327,7 +331,14 @@ def _execute(job):
             cine_report, visual_report, repair_iterations=len(repairs)
         )
         assessment_path = candidate_dir / ('closed-loop-evaluation-' + job['job_id'] + '.json')
+        assessment['feedback_binding'] = {
+            'job_id': job['job_id'], 'candidate_id': job['candidate_id'],
+            'sequence_path': job['sequence_path'],
+            'session_sha256': hashlib.sha256((candidate_dir / 'session.json').read_bytes()).hexdigest(),
+            'transfer_plan_sha256': hashlib.sha256((candidate_dir / 'transfer-plan.json').read_bytes()).hexdigest(),
+        }
         closed_loop_evaluation.write_new(assessment_path, assessment)
+        job['closed_loop_report_sha256'] = hashlib.sha256(assessment_path.read_bytes()).hexdigest()
         job['closed_loop_report_file'] = str(assessment_path)
         job['closed_loop_status'] = assessment['status']
     except Exception as exc:
@@ -354,6 +365,7 @@ def _execute(job):
         job['generation_readback_error'] = str(exc)
         unreal.log_warning('[CutSceneAI Studio] Generation readback unavailable: ' +
                            str(exc))
+    job['repair_feedback_ready'] = bool(ai and job.get('closed_loop_report_sha256'))
     return job
 
 

@@ -83,6 +83,13 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-27 — Environment regression passed; bounded repair feedback decision
+
+- Owner confirmed all checks passed at a287fe0 (exact count not supplied). Prior explicit 224 conversion and 252 host/provider counts, Node 23; PR #1 open draft.
+- Reviewed existing two-round deterministic visual repair and CineTwin assessment. Corrected global material matching to actor-scoped candidates only, excluded engine-owned primitives, and include empty slots in the existing stop-on-no-progress metric. AI transfer approval does not authorize additional in-place edits: AI jobs now stop after native audits and expose immutable job/candidate/session/plan-bound assessment feedback. Legacy deterministic bounded material retry remains scoped to newly created actors.
+- Added host POST /api/propose-ai-repair (existing token and lock), using the SAME TransferAgent/LangGraph selection contract with fixed advisory strategy IDs for measured source-bound motion mismatch or observed fallback materials with scoped source candidates. Candidate verification and source manifest verification before/after decision; assessment hash, active job, candidate, session, setup, plan identity checked; one exclusive persistent claim per completed AI job, even if inference fails. No arbitrary model patches/code, queue, approval, native mutation or fidelity claim. Selection is review-only; material candidate presence is not proof that an exact fallback slot can be repaired. No fresh candidate regeneration, repair execution authorization, UI button or cross-candidate retry budget yet. Existing assessment remains immutable.
+- Added ten regression cases (eight feedback, two material scope). Tests not run remotely. Run focused feedback/agent, host, native worker/preflight, visual/setup, prepared transfer and planner-sync regression; lint new feedback module and visual repair. Next complete candidate-specific repair strategy realization and bounded lineage authorization, then full regression/native acceptance. Keep engines/Ollama closed.
+
 ### 2026-11-27 — Static mesh preflight lint correction
 
 - Owner reported one SIM102 diagnostic at 0dd9ebe. Combined the nested component availability check into a single short-circuiting condition; behavior, validation safeguards and native mutation boundaries unchanged.

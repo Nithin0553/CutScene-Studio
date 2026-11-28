@@ -45,7 +45,14 @@ def evaluate(
             for mode in ("actor_world", "skeletal_root_world"):
                 measurements = row.get(mode) or {}
                 error = measurements.get("max_offset_removed_motion_error_cm")
-                if not isinstance(error, (float, int)) or not math.isfinite(error):
+                if type(error) not in (float, int) or not math.isfinite(error) or error < 0:
+                    if measurements:
+                        issues.append({
+                            "category": "CINETWIN_NATIVE_EVALUATION", "source": name,
+                            "domain": mode, "status": "INCOMPLETE",
+                            "detail": "Motion error measurement is unavailable or invalid.",
+                            "automatic_repair_allowed": False,
+                        })
                     continue
                 if error > max_motion_error_cm:
                     issues.append({
@@ -108,7 +115,9 @@ def evaluate(
                                "audio_waveform_and_timing", "signal_side_effects",
                                "materials_and_URP_shader_equivalence",
                                "save_reopen_independent_persistence"],
-        "next_action": "Only source-backed, independently measurable, non-destructive strategies may enter a future bounded retry; no automatic in-place modification was attempted.",
+        "next_action": ("Review recorded deterministic repairs and remeasure; fidelity remains unverified."
+                        if repair_iterations else
+                        "Only source-backed, independently measurable strategies may enter a bounded retry; no successful repair recorded."),
     }
 
 

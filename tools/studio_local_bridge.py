@@ -893,6 +893,27 @@ def job_status(job_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
     return result
 
 
+def propose_ai_repair(job_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
+    """Explicit, read-only model decision against completed immutable feedback."""
+    for path in (ROOT, ROOT / 'packages/studio', ROOT / 'packages/cinetwin', ROOT / 'integrations/unreal'):
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+    import prepared_transfer
+    import studio_auto_assets
+    from packages.studio.ollama_provider import OllamaProvider
+    from packages.studio.repair_feedback import propose
+    from packages.studio.transfer_agent import TransferAgent
+
+    def verify(candidate):
+        session = prepared_transfer.verify(candidate)
+        studio_auto_assets.verify(
+            candidate / 'automatic-setup.json', session['source']['csir_path'],
+            session['target']['mapping_path'], candidate / 'transfer-plan.json')
+        return session
+
+    return propose(folder, job_id, TransferAgent(OllamaProvider()), verify_candidate=verify)
+
+
 def diagnostic_summary(job_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
     job = job_status(job_id, folder)
     path_str = job.get('diagnostic_file')
@@ -1161,6 +1182,8 @@ def create_handler(webroot: Path, folder: Path = WORKSPACE):
                         result = prepare(folder, data)
                     elif route == '/api/ai-native-preflight':
                         result = request_ai_native_preflight(str(data.get('candidate_id', '')), folder)
+                    elif route == '/api/propose-ai-repair':
+                        result = propose_ai_repair(str(data.get('job_id', '')), folder)
                     elif route == '/api/approve-ai-execution':
                         result = approve_ai_execution(str(data.get('candidate_id', '')),
                                                       str(data.get('request_id', '')),

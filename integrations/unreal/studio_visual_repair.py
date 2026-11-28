@@ -29,8 +29,10 @@ def attempt(job: dict[str, Any], setup: dict[str, Any], api: Any) -> dict[str, A
         job["automatic_setup_manifest"], job["csir"], job["mapping"],
         candidate / "transfer-plan.json",
     )
-    sources = manifest.get("source_albedo_material_candidates") or []
-    if not sources:
+    scoped = manifest.get("source_albedo_actor_candidates")
+    # A global material name cannot identify the material of a particular actor.
+    # Legacy manifests lack this evidence and are not eligible for repair.
+    if not isinstance(scoped, dict) or not any(scoped.values()):
         return {"status": "NO_SOURCE_BACKED_ALBEDO", "changed": 0, "slots": []}
     imported_actors = {item["name"] for item in setup.get("actors_created") or []}
     if not imported_actors:
@@ -38,10 +40,12 @@ def attempt(job: dict[str, Any], setup: dict[str, Any], api: Any) -> dict[str, A
     # Only reuse a material created by the verified initial import, not any
     # unrelated/user-created asset with a coincidental Unreal package path.
     cache = {}
-    candidate_paths = {row["target_material"]: row for row in sources}
     for row in setup.get("material_restoration") or []:
         path = row.get("target_material")
-        source = candidate_paths.get(path)
+        matches = [source for source in scoped.get(row.get("actor"), [])
+                   if source["target_material"] == path
+                   and source["slot_name"] == row.get("slot_name")]
+        source = matches[0] if len(matches) == 1 else None
         if (row.get("status") != "SOURCE_ALBEDO_ASSIGNED_RENDER_PARITY_UNVERIFIED"
                 or not source or row.get("source_material_sha256") != source["source_material_sha256"]):
             continue
@@ -55,7 +59,11 @@ def attempt(job: dict[str, Any], setup: dict[str, Any], api: Any) -> dict[str, A
         by_label.setdefault(str(actor.get_actor_label()), []).append(actor)
     slots = []
     for row in manifest["actors"]:
-        if row["name"] not in imported_actors or row["kind"] not in {"entity.character", "entity.prop"}:
+        if (row["name"] not in imported_actors or row["kind"] not in {"entity.character", "entity.prop"}
+                or row.get("source_primitive")):
+            continue
+        sources = scoped.get(row["name"], [])
+        if not sources:
             continue
         matches = by_label.get(row["label"], [])
         if len(matches) != 1:

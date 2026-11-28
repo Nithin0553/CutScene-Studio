@@ -9,7 +9,8 @@
   const state = {screen:'home', phase:'IDLE', busy:false, info:'', error:'', status:null,
     discovery:null, folders:{unity:'',unreal:''}, unrealProject:'', csir:'', level:'',
     sourceRights:false, allowPartial:false, enableAI:false, candidate:null, job:null, verification:null,
-    diagnosis:null, feedback:null, aiPreflight:null, aiMemory:null, running:false, detailsOpen:false, menuOpen:false,
+    diagnosis:null, feedback:null, repairReview:null, repairOutcome:null, repairLevel:'',
+    aiPreflight:null, aiMemory:null, running:false, detailsOpen:false, menuOpen:false,
     censusOptions:[], censusPath:'', censusSelection:null, censusIssue:false, editorHelpOpen:false};
   const pathRoot = () => String(state.status?.repo_root||'').replaceAll('\\','/');
   const workerCommand = () => {
@@ -179,7 +180,7 @@
       ' /> Allow partial transfer (not verified)</label>'+
       '<label><input type="checkbox" name="enable-ai-agent" '+(state.enableAI?'checked ':'')+
       (state.busy||activeJob?'disabled':'')+' /> Enable AI Agent (local Ollama)</label>'+
-      (state.enableAI?'<p class="subnote">Analyze the selected source and prepare a verified plan. Native AI transfer is not enabled yet.</p>':'')+
+      (state.enableAI?'<p class="subnote">Analyze the selected source and prepare a verified plan. Native AI transfer requires a separate inspection and explicit approval.</p>':'')+
       '</div>':'')+
       (Object.values(d.errors||{})).map(v=>'<p class="warning">'+esc(v)+'</p>').join('')+
       '<div class="center-actions">'+(chosenU?action:'')+'</div></form>'+
@@ -216,6 +217,8 @@
     const a=state.candidate.ai_analysis,c=a.decision_counts||{};
     return '<section class="research" aria-label="AI preparation report">'+
       '<h3>Source analysis and verified candidate</h3>'+
+      (state.candidate.repair_lineage?
+        '<p class="subnote">Repair attempt 1 of 1. Original transfer preserved. Open the separate saved staging map '+esc(state.candidate.repair_lineage.target_level)+' before inspection.</p>':'')+
       resultRow('Proposed mappings',c.proposed??'Not reported')+
       resultRow('Withheld mappings',c.unsupported??'Not reported')+
       resultRow('Failed / not analyzed',(c.failed??'?')+' / '+(c.not_analyzed??'?'))+
@@ -306,6 +309,46 @@
       (j.created_at?' · Created '+esc(j.created_at):'')+
       ' · This is an execution failure, not a CineTwin fidelity comparison.</p></section>';
   }
+  function repairPanel(){
+    const j=state.job||{},r=state.repairReview,o=state.repairOutcome;
+    if(!generated())return '';
+    if(j.repair_outcome_status){
+      const names={MEASURED_ROOT_MOTION_IMPROVED:'Measured root motion improved',
+        NO_MEASURED_IMPROVEMENT:'No measured improvement',REGRESSION_DETECTED:'Regression detected',
+        INCOMPLETE:'Comparison incomplete'};
+      const rows=(o?.metrics||[]).filter(row=>row.selected);
+      return '<section class="research repair-panel" aria-label="Repair outcome"><h3>Repair comparison</h3>'+
+        resultRow('Outcome',o?.available?(names[o.status]||o.status):
+          (j.repair_outcome_error?'Comparison incomplete':'Comparison evidence unavailable'))+
+        rows.map(row=>'<div class="repair-metric"><strong>'+esc(row.entity)+'</strong>'+
+          '<p>Maximum motion error: '+esc(Number(row.before.max_offset_removed_motion_error_cm).toFixed(2))+
+          ' cm → '+esc(Number(row.after.max_offset_removed_motion_error_cm).toFixed(2))+' cm</p></div>').join('')+
+        (o?.incomplete||[]).map(reason=>'<p class="subnote">'+esc(reason)+'</p>').join('')+
+        (j.repair_outcome_error?'<p class="warning">'+esc(j.repair_outcome_error)+'</p>':'')+
+        '<p class="subnote">One repair attempt completed. Original sequence preserved. Full fidelity remains unverified.</p></section>';
+    }
+    if(!j.repair_feedback_ready)return '';
+    const status=r?.status||'CHECKING';
+    const names={review_motion_mapping:'Motion mapping review',review_source_albedo:'Source material review'};
+    return '<section class="research repair-panel" aria-label="AI repair"><h3>AI repair</h3>'+
+      '<p class="subnote">One repair decision and at most one fresh repair candidate. No changes to the original transfer.</p>'+
+      (r?.can_request?button('Request repair proposal','request-repair',state.busy,'secondary'):'')+
+      (status==='PROPOSAL_SAVED'?resultRow('Selected strategy',names[r.selected_strategy]||'No supported repair selected'):'')+
+      (status==='DECISION_CONSUMED'?'<p class="subnote">Decision budget consumed; no saved proposal is available.</p>':'')+
+      (status==='ATTEMPT_CONSUMED'?'<p class="subnote">Repair attempt budget consumed. No additional retry is available.</p>':'')+
+      (status==='CHECKING'?'<p class="subnote">Checking saved repair evidence…</p>':'')+
+      (status==='PROPOSAL_SAVED'&&!r.can_prepare?
+        '<p class="subnote">'+esc(r.reason||'This proposal is advisory only; no executable repair adapter is available.')+'</p>':'')+
+      (r?.can_prepare?'<p class="subnote">Create and save a separate empty staging map in the same Unreal project. Enter its /Game/ path. Do not reuse '+esc(r.original_level)+'.</p>'+
+        '<label class="choice"><span>Separate saved staging map</span><input name="repair-level" value="'+esc(state.repairLevel)+'" placeholder="/Game/Maps/L_Repair" '+(state.busy?'disabled':'')+'></label>'+
+        button('Prepare repair candidate','prepare-repair',state.busy||!validRepairLevel(),'secondary')+
+        '<p class="subnote">Preparation does not authorize native changes. A fresh inspection and explicit approval will follow.</p>':'')+
+      (state.busy?'<p role="status" class="subnote">Processing repair request…</p>':'')+'</section>';
+  }
+  function validRepairLevel(){
+    return /^\/Game\/(?:[A-Za-z0-9_]+\/)*[A-Za-z0-9_]+$/.test(state.repairLevel)&&
+      norm(state.repairLevel)!==norm(state.repairReview?.original_level);
+  }
   function results(){
     const j=state.job||{},v=state.verification||{},ok=generated(),candidate=state.candidate||{};
     const imports=Number.isInteger(j.assets_imported_count)?j.assets_imported_count:'Not independently verified';
@@ -325,7 +368,7 @@
       '<p>CineTwin behavioral parity: '+(state.diagnosis?'Measured — not full fidelity':'Not verified')+'</p>'+
       '<p>Visual fidelity: '+esc(v.visual?.status||'Not verified')+'</p>'+
       '</div>'+
-      research()+'<div class="center-actions">'+button('New Transfer','projects',false,'secondary')+'</div></main>';
+      repairPanel()+research()+'<div class="center-actions">'+button('New Transfer','projects',state.busy,'secondary')+'</div></main>';
   }
   function about(){return '<main class="about-view"><h1>CutScene Studio</h1>'+
     '<p>This local system analyzes Unity cutscenes, plans native Unreal reconstruction, and measures known source-to-target differences. CineTwin and CED provide evidence and conversion strategies; unsupported effects are explicitly reported.</p>'+
@@ -423,6 +466,7 @@
       unreal_folder:state.folders.unreal,unreal_project:state.unrealProject,
       csir:state.csir,level:state.level,source_rights_confirmed:state.sourceRights});
     state.status.connection=info;state.candidate=null;state.job=null;state.verification=null;state.diagnosis=null;state.feedback=null;state.running=false;
+    state.repairReview=null;state.repairOutcome=null;state.repairLevel='';
     state.censusOptions=[];state.censusPath='';state.censusSelection=null;
     state.phase='CONNECTED';state.info='Projects connected.';
     state.error='';state.censusIssue=false;
@@ -435,7 +479,13 @@
       try{state.aiMemory=await api('ai-model-memory');}catch{state.aiMemory=null;}
       try{state.aiPreflight=await api('ai-native-preflight');}catch{state.aiPreflight=null;}
     }else{state.aiPreflight=null;state.aiMemory=null;}
-    if(s.active_job)state.job=await api('jobs/'+s.active_job);
+    if(s.active_job){
+      if(state.job?.job_id!==s.active_job){
+        state.verification=null;state.diagnosis=null;state.feedback=null;
+        state.repairReview=null;state.repairOutcome=null;state.repairLevel='';
+      }
+      state.job=await api('jobs/'+s.active_job);
+    }
     if(terminal(state.job)){
       state.phase=generated()?'COMPLETE':'BLOCKED';
       try{state.verification=await api('verification');}catch{}
@@ -444,6 +494,14 @@
       }
       if(!state.feedback) {
         try{const feedback=await api('closed-loop');if(feedback.available)state.feedback=feedback;}catch{}
+      }
+      if(state.job.repair_feedback_ready && !state.repairReview){
+        try{state.repairReview=await api('repair-review/'+state.job.job_id);}catch(e){
+          state.repairReview={status:'NOT_AVAILABLE',reason:e.message};state.error=e.message;
+        }
+      }
+      if(state.job.repair_outcome_status && !state.repairOutcome){
+        try{state.repairOutcome=await api('repair-outcome/'+state.job.job_id);}catch(e){state.error=e.message;}
       }
     }
   }
@@ -593,6 +651,37 @@
       if(aiCandidate()&&!state.job){state.screen='transfer';state.phase='AI_PREPARED';state.running=false;render();}
       return;
     }
+    if(name==='request-repair'||name==='prepare-repair'){
+      if(state.busy||polling||!generated()||!state.job.repair_feedback_ready)return;
+      if(name==='request-repair'&&!state.repairReview?.can_request)return;
+      if(name==='prepare-repair'&&(!state.repairReview?.can_prepare||!validRepairLevel()))return;
+      const job_id=state.job.job_id,level=state.repairLevel;
+      state.busy=true;state.error='';state.info='';render();
+      try{
+        if(name==='request-repair'){
+          await api('propose-ai-repair',{job_id});
+          state.repairReview=await api('repair-review/'+job_id);
+          state.info='Repair review recorded. No native changes performed.';
+        }else{
+          const candidate=await api('prepare-ai-repair',{job_id,level});
+          if(!candidate.ai_analysis||!candidate.repair_lineage||!candidate.automatic_setup?.ready)
+            throw Error('Verified repair candidate not returned. No execution requested.');
+          state.candidate=candidate;state.job=null;state.running=false;state.enableAI=true;
+          state.verification=null;state.diagnosis=null;state.feedback=null;
+          state.repairReview=null;state.repairOutcome=null;state.repairLevel='';
+          state.aiMemory=null;state.aiPreflight=null;
+          state.level=level;state.screen='transfer';state.phase='AI_PREPARED';
+          await refresh();
+          state.info='Repair candidate prepared. Inspect and authorize separately.';
+        }
+      }catch(e){
+        state.error=e.message;
+        if(state.job?.job_id===job_id){
+          try{state.repairReview=await api('repair-review/'+job_id);}catch{state.repairReview=null;}
+        }
+      }finally{state.busy=false;render();}
+      return;
+    }
     if(name==='inspect-ai-target'){
       if(state.busy||!aiCandidate()||state.job||!validEditor()||!state.candidate.automatic_setup?.ready)return;
       state.busy=true;state.error='';render();
@@ -703,6 +792,7 @@
   });
   $('#app').addEventListener('change',async e=>{
     const n=e.target?.name,v=e.target?.value;
+    if(n==='repair-level'){if(!state.busy)state.repairLevel=v.trim();render();return;}
     if(n==='source-rights'){state.sourceRights=e.target.checked;render();return;}
     if(n==='allow-partial'){state.allowPartial=e.target.checked;render();return;}
     if(n==='enable-ai-agent'){if(!state.busy)state.enableAI=e.target.checked;render();return;}

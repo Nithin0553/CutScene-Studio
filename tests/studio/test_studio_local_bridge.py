@@ -1318,3 +1318,38 @@ def test_repair_outcome_endpoint_checks_exact_report_hash(service):
     path.write_text('{}', encoding='utf-8')
     status, body = call(base + '/api/repair-outcome/' + job_id)
     assert status == 409 and 'changed' in body['error']
+
+
+@pytest.mark.parametrize("case,expected,can_request", [
+    ("new", "NOT_REQUESTED", True),
+    ("claimed", "DECISION_CONSUMED", False),
+    ("attempt", "ATTEMPT_CONSUMED", False),
+    ("advisory", "PROPOSAL_SAVED", False),
+])
+def test_repair_review_restores_saved_state_without_inference(service, case, expected, can_request):
+    base, tmp = service
+    folder = tmp / 'work'
+    job_id = 'd' * 32
+    candidate = folder / 'candidates' / 'original'
+    candidate.mkdir(parents=True)
+    (folder / 'jobs').mkdir()
+    job = {'job_id': job_id, 'candidate_id': candidate.name, 'candidate_dir': str(candidate),
+           'expected_level': '/Game/Original', 'repair_feedback_ready': True,
+           'closed_loop_report_sha256': 'hash'}
+    (folder / 'jobs' / (job_id + '.json')).write_text(json.dumps(job))
+    (folder / 'active-job.json').write_text(json.dumps({'job_id': job_id}))
+    if case != 'new':
+        (candidate / ('ai-repair-claim-' + job_id + '.json')).write_text('{}')
+    if case == 'attempt':
+        (candidate / 'repair-attempt.json').write_text('{}')
+    if case == 'advisory':
+        value = {'kind': 'cutsceneai.studio.ai_repair_proposal', 'feedback_binding': {
+            'job_id': job_id, 'candidate_id': candidate.name}, 'feedback_sha256': 'hash',
+            'execution_authorized': False, 'selected_strategy': 'review_source_albedo'}
+        (candidate / ('ai-repair-proposal-' + job_id + '.json')).write_text(json.dumps(value))
+    status, result = call(base + '/api/repair-review/' + job_id)
+    assert status == 200
+    assert result['status'] == expected
+    assert result['can_request'] is can_request
+    assert result['can_prepare'] is False
+    assert result['execution_authorized'] is False

@@ -83,6 +83,13 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-28 — Repair comparison regression passed; cinematic UI repair workflow
+
+- Owner confirmed all checks passed at 42c0334 (exact count not supplied; previous 236 pass/1 fail). Draft PR #1 remains open, no CI runs.
+- Results page now exposes explicitly requested AI repair review, immutable saved proposal/consumed budget recovery, advisory-only status and separate saved staging level input for eligible skeletal-root proposals. New read-only GET /api/repair-review/<job_id> reflects persistent claim/attempt state and lightweight eligibility; preparation still performs full source/setup replay. Fresh candidate returns to existing AI plan screen, clears prior job/verification/inspection state, and requires fresh native inspection, model-memory readiness and explicit authorization. No automatic execution or retries. Home-first startup preserved. Post-repair outcome shows selected measured maximum motion errors, status and incomplete reasons; no fidelity certification.
+- Retain minimal black/white/green visual design. Manual map path entry intentionally avoids reconnecting or replacing the original job while preparing repair. User must create/save separate empty staging map and enter its /Game path. Backend continues to refuse original map and invalid/missing source evidence. No new agent, native mutation or unsupported repair adapter.
+- Added three Node UI scenarios (26 total) and four host review state cases. New checks not executed remotely. Run Node contract, host and repair tests; next full software regression, remaining semantic coverage review, native Benchmark 001/002 acceptance. Keep Unity/Unreal/Ollama closed.
+
 ### 2026-11-28 — Reject changed parent job before resolving candidate paths
 
 - Owner reported 236 passed, one failed in 136.89 seconds at 81abdc6. The parent-job tampering test raised KeyError on a missing candidate_id before checking the expected job hash, rather than the specified ValueError.

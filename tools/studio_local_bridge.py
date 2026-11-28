@@ -915,6 +915,55 @@ def propose_ai_repair(job_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
     return propose(folder, job_id, TransferAgent(OllamaProvider()), verify_candidate=verify)
 
 
+def repair_review_status(job_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
+    """Read saved review state without starting inference or touching Unreal."""
+    status = job_status(job_id, folder)
+    result = {'job_id': job_id, 'status': 'NOT_AVAILABLE', 'can_request': False,
+              'can_prepare': False, 'execution_authorized': False}
+    active = folder / 'active-job.json'
+    if (not active.is_file() or load_json(active).get('job_id') != job_id
+            or status.get('repair_feedback_ready') is not True):
+        return result
+    job = load_json(folder / 'jobs' / (job_id + '.json'))
+    root = (folder / 'candidates').resolve()
+    candidate_id = str(job.get('candidate_id') or '')
+    candidate = (root / candidate_id).resolve()
+    if (not candidate_id.isascii() or not candidate_id.replace('_', '').isalnum()
+            or candidate.parent != root or candidate != Path(job['candidate_dir']).resolve()):
+        raise ValueError('Unsafe repair review candidate.')
+    result['original_level'] = job['expected_level']
+    claim = candidate / ('ai-repair-claim-' + job_id + '.json')
+    proposal = candidate / ('ai-repair-proposal-' + job_id + '.json')
+    attempt = candidate / 'repair-attempt.json'
+    if attempt.exists():
+        return {**result, 'status': 'ATTEMPT_CONSUMED'}
+    if not proposal.is_file():
+        return {**result, 'status': 'DECISION_CONSUMED' if claim.exists() else 'NOT_REQUESTED',
+                'can_request': not claim.exists()}
+    value = load_json(proposal)
+    if (not claim.is_file() or value.get('kind') != 'cutsceneai.studio.ai_repair_proposal'
+            or value.get('feedback_binding', {}).get('job_id') != job_id
+            or value.get('feedback_binding', {}).get('candidate_id') != candidate_id
+            or value.get('feedback_sha256') != job.get('closed_loop_report_sha256')
+            or value.get('execution_authorized') is not False):
+        raise ValueError('Repair review evidence differs.')
+    result.update(status='PROPOSAL_SAVED', selected_strategy=value.get('selected_strategy'),
+                  decision_status=value.get('decision_status'))
+    if value.get('selected_strategy') == 'review_motion_mapping':
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from packages.studio.repair_candidate import parent_evidence
+
+        try:
+            # Display eligibility only. Full source and setup replay is mandatory
+            # in prepare_ai_repair; no model or editor call is made here.
+            parent_evidence(root, job_id, lambda path: load_json(path / 'session.json'))
+            result['can_prepare'] = True
+        except (ValueError, KeyError, TypeError, OSError) as exc:
+            result['reason'] = str(exc)
+    return result
+
+
 def prepare_ai_repair(job_id: str, level: str, folder: Path = WORKSPACE) -> dict[str, Any]:
     """Prepare a distinct repair handoff; normal inspection/approval still required."""
     for path in (ROOT, ROOT / 'packages/studio', ROOT / 'packages/cinetwin', ROOT / 'integrations/unreal'):
@@ -949,12 +998,16 @@ def prepare_ai_repair(job_id: str, level: str, folder: Path = WORKSPACE) -> dict
         raise ValueError('Repair candidate replay differs.')
     studio_auto_assets.verify(child / 'automatic-setup.json', config['csir'], mapping_path,
                               child / 'transfer-plan.json')
+    handoff = load_json(child / 'ai-handoff.json')
     info = {'candidate_id': child.name, 'candidate_dir': str(child), 'mapping_copy': str(mapping_path),
             'sequence_path': session['target']['sequence_asset_path'],
+            'action_total': len(load_json(child / 'transfer-plan.json')['actions']),
             'automatic_setup': {'available': True, 'ready': True, 'blockers': [],
                                 'warnings': setup['warnings'], 'planned_imports': len(setup['imports']),
                                 'planned_actors': len(setup['actors'])},
-            'ai_analysis': {'status': 'PREPARED_ADVISORY', 'execution_enabled': False},
+            'ai_analysis': {'status': 'PREPARED_ADVISORY', 'execution_enabled': False,
+                            'decision_counts': handoff['analysis_decision_counts'],
+                            'reason': 'Fresh repair candidate requires new native inspection and approval.'},
             'repair_lineage': load_json(mapping_path)['studio_repair_lineage'],
             'engine_generation_executed': False, 'behavioral_fidelity_established': False}
     atomic_json(folder / 'connection.json', fresh_config)
@@ -1157,6 +1210,13 @@ def create_handler(webroot: Path, folder: Path = WORKSPACE):
                     return self.reply(200, job_status(path.rsplit('/', 1)[-1], folder))
                 except (ValueError, TypeError) as e:
                     return self.reply(404, {'error': str(e)})
+            if path.startswith('/api/repair-review/'):
+                try:
+                    with LOCK:
+                        result = repair_review_status(path.rsplit('/', 1)[-1], folder)
+                    return self.reply(200, result)
+                except (ValueError, TypeError, KeyError, OSError) as e:
+                    return self.reply(409, {'error': str(e)})
             if path.startswith('/api/repair-outcome/'):
                 try:
                     return self.reply(200, repair_outcome_summary(path.rsplit('/', 1)[-1], folder))

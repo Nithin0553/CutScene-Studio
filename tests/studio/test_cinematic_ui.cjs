@@ -8,7 +8,8 @@ const css = fs.readFileSync('apps/studio-web/cinematic.css', 'utf8');
 
 function boot({editorReady = true, censusUnresolved = false, multiSources = false,
   restoredJob = '', restoredPending = false, restoredAI = false, aiFailure = false,
-  missingAI = false, approvalFails = false, newMap = false, memoryBlocked = false} = {}) {
+  missingAI = false, approvalFails = false, newMap = false, memoryBlocked = false,
+  repairReview = '', repairOutcome = '', repairFails = false} = {}) {
   const listeners = {}, calls = [], requests = [];
   let html = '', writes = 0, copied = '';
   const app = {
@@ -23,6 +24,8 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
   let approval = null;
   let inspectionRequested = false;
   let done = false;
+  let reviewState = repairReview;
+  let repairPrepared = false;
   const unity = 'D:/CutSceneAI_Unity';
   const unreal = 'D:/CutSceneAI_Unreal';
   const csir = unity + '/CutSceneAI/Exports/Benchmark002.csir.json';
@@ -65,6 +68,8 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
         setup_recovery:'Do not rerun this candidate; inspect staged assets.'
       }:{})};
     done=restoredJob==='finished';
+    if(currentJob&&repairReview)currentJob.repair_feedback_ready=true;
+    if(currentJob&&repairOutcome)currentJob.repair_outcome_status=repairOutcome;
   }
   const fake = {
     document: {querySelector(sel) {
@@ -82,7 +87,7 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
         result = {token: 'stubtoken', repo_root: 'B:/Research/CutSceneAI/CutsceneAI', workspace:'C:/Users/Test/.cutscene-studio/runs',
           connection: connected, candidate, active_job: currentJob?.job_id || null,
           one_click_approval: approval,
-          unreal_worker: {connected: editorReady, project: file, level:newMap?'/Temp/Untitled':level, worker_version: 'studio-editor-v0.5'},
+          unreal_worker: {connected: editorReady, project: file, level:repairPrepared?connected.level_path:newMap?'/Temp/Untitled':level, worker_version: 'studio-editor-v0.5'},
           destination_readiness: candidate && editorReady ?
             {status: newMap?'NEW_LEVEL_REQUIRED':'READY', ready:!newMap, candidate_id:candidate.candidate_id} :
             {status: 'WAITING_FOR_UNREAL', ready:false, next_action:'Open Unreal Editor'}};
@@ -142,6 +147,26 @@ function boot({editorReady = true, censusUnresolved = false, multiSources = fals
           ...(body.enable_ai_agent&&!missingAI?{ai_analysis:advisory}:{}),
           automatic_setup:{available:true,ready:true,blockers:[],planned_imports:18,planned_actors:10}};
         result = candidate;
+      } else if (url.startsWith('/api/repair-review/')) {
+        result={job_id:currentJob.job_id,status:reviewState,original_level:level,
+          can_request:reviewState==='NOT_REQUESTED',can_prepare:reviewState==='PROPOSAL_SAVED',
+          selected_strategy:reviewState==='ADVISORY'?'review_source_albedo':'review_motion_mapping'};
+        if(reviewState==='ADVISORY')result.status='PROPOSAL_SAVED';
+      } else if (url === '/api/propose-ai-repair') {
+        assert.equal(body.job_id,currentJob.job_id);
+        reviewState='PROPOSAL_SAVED';result={execution_authorized:false};
+      } else if (url === '/api/prepare-ai-repair') {
+        assert.equal(body.job_id,currentJob.job_id);assert.notEqual(body.level,level);
+        reviewState='ATTEMPT_CONSUMED';
+        if(repairFails)return {ok:false,status:422,json:async()=>({error:'Repair preparation blocked'})};
+        candidate={candidate_id:'repair_abcdef012345',ai_analysis:advisory,
+          repair_lineage:{target_level:body.level},automatic_setup:{available:true,ready:true}};
+        connected={...connected,level_path:body.level,auto_create_level:false};
+        currentJob=null;done=false;repairPrepared=true;inspectionRequested=false;result=candidate;
+      } else if (url.startsWith('/api/repair-outcome/')) {
+        result={available:true,status:repairOutcome,metrics:[{selected:true,entity:'Hero',
+          before:{max_offset_removed_motion_error_cm:8},after:{max_offset_removed_motion_error_cm:1}}],
+          fidelity_verified:false};
       } else if (url === '/api/approve-one-click') {
         assert.equal(body.candidate_id,'candidate001');
         approval={candidate_id:body.candidate_id,source_csir:connected.csir};
@@ -678,7 +703,60 @@ async function testResidentModelBlocksAuthorization(){
   assert.equal(x.calls.filter(r=>r==='/api/execute').length,1);
 }
 
+async function testRepairProposalAndPreparationRequireSeparateApproval(){
+  const x=boot({restoredJob:'finished',repairReview:'NOT_REQUESTED'});
+  await x.pause();await x.pause();await x.click('results');
+  assert.match(x.app.innerHTML,/Request repair proposal/);
+  await x.click('request-repair');
+  assert.match(x.app.innerHTML,/Motion mapping review/);
+  await x.click('request-repair');
+  assert.equal(x.calls.filter(r=>r==='/api/propose-ai-repair').length,1);
+  await x.change('repair-level','/Game/CutSceneAI/L_Trial01');
+  await x.click('prepare-repair');
+  assert.ok(!x.calls.includes('/api/prepare-ai-repair'));
+  await x.change('repair-level','/Game/CutSceneAI/L_Repair');
+  await x.click('prepare-repair');
+  assert.match(x.app.innerHTML,/Repair attempt 1 of 1/);
+  assert.match(x.app.innerHTML,/Inspect target \(read-only\)/);
+  assertNoNativeCalls(x);
+  await x.click('inspect-ai-target');await x.poll();
+  assertNoNativeCalls(x);
+  await x.click('authorize-ai-transfer');
+  assert.equal(x.calls.filter(r=>r==='/api/execute').length,1);
+}
+
+async function testSavedProposalAndFailedAttemptDoNotRepeatInference(){
+  const x=boot({restoredJob:'finished',repairReview:'PROPOSAL_SAVED',repairFails:true});
+  await x.pause();await x.pause();await x.click('results');
+  assert.match(x.app.innerHTML,/Prepare repair candidate/);
+  assert.ok(!x.calls.includes('/api/propose-ai-repair'));
+  await x.change('repair-level','/Game/CutSceneAI/L_Repair');
+  await x.click('prepare-repair');
+  assert.match(x.app.innerHTML,/Repair attempt budget consumed/);
+  await x.click('prepare-repair');
+  assert.equal(x.calls.filter(r=>r==='/api/prepare-ai-repair').length,1);
+  assertNoNativeCalls(x);
+}
+
+async function testAdvisoryOnlyAndRepairOutcome(){
+  const x=boot({restoredJob:'finished',repairReview:'ADVISORY'});
+  await x.pause();await x.pause();await x.click('results');
+  assert.match(x.app.innerHTML,/advisory only/);
+  assert.doesNotMatch(x.app.innerHTML,/Prepare repair candidate/);
+  assertNoNativeCalls(x);
+  const y=boot({restoredJob:'finished',repairOutcome:'MEASURED_ROOT_MOTION_IMPROVED'});
+  await y.pause();await y.pause();await y.click('results');
+  assert.match(y.app.innerHTML,/Measured root motion improved/);
+  assert.match(y.app.innerHTML,/8.00 cm → 1.00 cm/);
+  assert.match(y.app.innerHTML,/Full fidelity remains unverified/);
+  assert.doesNotMatch(y.app.innerHTML,/Request repair proposal/);
+  assertNoNativeCalls(y);
+}
+
 (async()=>{
+  await testRepairProposalAndPreparationRequireSeparateApproval();
+  await testSavedProposalAndFailedAttemptDoNotRepeatInference();
+  await testAdvisoryOnlyAndRepairOutcome();
   await testResidentModelBlocksAuthorization();
   await testNewMapRequiresExplicitCreationApproval();
   await testExplicitAIApprovalQueuesOnlyOnce();
@@ -702,5 +780,5 @@ async function testResidentModelBlocksAuthorization(){
   await testStrictCensusBlockAndExplicitRecovery();
   await testManualCSIRAndCensus();
   await testMissingSelectedCensusFailsClosed();
-  console.log('Cinematic UI backend contract: 23 scenarios including model memory readiness, fresh-map approval, AI approval, read-only AI inspection, AI preparation-only, failure recovery, native errors and Home-first startup passed.');
+  console.log('Cinematic UI backend contract: 26 scenarios including bounded repair controls, model memory readiness, fresh-map approval, AI approval, read-only AI inspection, AI preparation-only, failure recovery, native errors and Home-first startup passed.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

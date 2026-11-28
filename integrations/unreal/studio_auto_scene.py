@@ -17,6 +17,7 @@ ROOT=Path(__file__).resolve().parents[2]
 if str(ROOT/'tools') not in sys.path:
     sys.path.insert(0,str(ROOT/'tools'))
 import rig_identity
+import static_mesh_identity
 import studio_auto_assets as assets_plan
 import studio_light_properties
 import studio_material_restore
@@ -113,7 +114,7 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
              'status':'BLOCKED','actors_created':[],'assets_imported':[],
              'asset_operations':[],'actor_operations':[],'failed_step':None,
              'level_saved':False,'changes_possible':False,'fidelity_verified':False,
-              'material_restoration':[], 'light_property_setup':[], 'rig_identity_setup':[],
+              'material_restoration':[], 'light_property_setup':[], 'rig_identity_setup':[], 'static_mesh_setup':[],
              'unsupported':['Unity .mat materials/shader graphs are not reconstructed; FBX embedded materials are optional and partial',
                             'Unity particle/VFX/constraints/scripts and signal payloads are not reconstructed',
                             'Imported animation bone correspondence and audio playback are not verified']}
@@ -191,6 +192,7 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
         actor_ops={row['name']:row for row in receipt['actor_operations']}
         meshes={}
         props=preflight_primitive_meshes(manifest, api)
+        static_mesh_identity.preflight(manifest, api)
         groups=[('SkeletalMesh',manifest['imports']),('StaticMesh',manifest['imports']),('AnimSequence',manifest['imports']),
                 ('SoundWave',manifest['imports']),('Texture2D',manifest['imports'])]
         for kind,records in groups:
@@ -272,11 +274,10 @@ def run(manifest_path, receipt_path, *,csir_path,mapping_path,plan_path,
                 receipt['failed_step']={'phase':'rig_identity_setup','name':row['name']}
                 measurement=rig_identity.verify_mesh(actor, meshes[row['name']], api)
                 receipt['rig_identity_setup'].append(dict(measurement, actor=row['name']))
-            if row.get('source_primitive'):
-                component = actor.get_component_by_class(api.StaticMeshComponent)
-                mesh = component.get_editor_property('static_mesh') if component is not None else None
-                if _klass(mesh) != 'StaticMesh' or str(mesh.get_path_name()) != row['mesh_path']:
-                    raise AutomaticSetupError('Spawned primitive mesh readback differs: '+row['name'])
+            if kind=='entity.prop' and row.get('mesh_path'):
+                receipt['failed_step']={'phase':'static_mesh_setup','name':row['name']}
+                measurement=static_mesh_identity.verify(actor, row['mesh_path'], api)
+                receipt['static_mesh_setup'].append(dict(measurement, actor=row['name']))
             if row.get('light_setup'):
                 receipt['failed_step']={'phase':'light_property_setup','name':row['name']}
                 measurement = studio_light_properties.apply(actor, row, api)

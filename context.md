@@ -83,6 +83,13 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-27 — Material regression passed; native environment mesh identity
+
+- Owner confirmed all checks passed at 4d361ec (exact count not supplied). Prior explicit 224 conversion and 252 host/provider counts, Node 23; PR #1 open draft.
+- Existing source asset inspector resolves source-backed FBX props, including exact references outside scan scope; previous native setup checked only built-in Cube mesh assignments. Added static_mesh_identity read-only adapter verifying one native StaticMeshComponent, actual mesh class and exact planned package or full object path. Required component type checked before import/spawn and during AI native inspection; old Cube bounds and identity preflight retained. Automatic setup checks every mesh-backed prop immediately, records native evidence and fails with existing partial-mutation receipt if assignment is incorrect. Canonical helper reload included.
+- Post-reopen persistence audit now requires StaticMeshActor for mesh-backed props, verifies actual mesh against immutable manifest, reports FAIL or INCOMPLETE rather than passing empty placeholder or wrong geometry. Transform-only props remain explicitly partial; no unsupported geometry synthesized. No claim of multi-renderer/submesh reconstruction, procedural/terrain/vegetation systems, mesh topology, pivot, collision or visual fidelity. No source resolver behavior changed.
+- Added 16 cases (nine helper, three setup, four persistence); not run remotely. Run affected automatic setup/asset/persistence/visual/planner-sync/host regression and Ruff on new helper and clean audit/preflight modules. Keep engines/Ollama closed. Next bounded CineTwin repair and complete software regression, with remaining unsupported semantics explicitly tracked.
+
 ### 2026-11-27 — Animation timing regression passed; source-backed albedo identity and native slot verification
 
 - Owner confirmed all checks passed at 61c071b (exact count not supplied). Prior explicit 224 conversion and 252 host/provider counts, Node 23. PR #1 open draft.

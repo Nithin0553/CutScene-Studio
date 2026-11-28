@@ -169,6 +169,7 @@ def inspect_candidate(
         if row.get('light_setup'):
             scene.studio_light_properties.preflight(row, api)
     primitives = scene.preflight_primitive_meshes(setup, api)
+    scene.static_mesh_identity.preflight(setup, api)
     if (_snapshot(session_path)[1] != session_hash
             or _snapshot(setup_path)[1] != setup_hash
             or scene._project(api) != observed_project

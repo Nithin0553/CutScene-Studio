@@ -466,3 +466,35 @@ def test_assigned_material_slot_is_independently_checked(tmp_path, case, status)
     assert result["status"] == status
     assert len(result["material_slot_readback"]) == 1
     assert result["fidelity_verified"] is False
+
+
+@pytest.mark.parametrize("case,status", [
+    ("valid", "STRUCTURAL_READBACK_PASS_RESTART_UNVERIFIED"),
+    ("wrong_mesh", "STRUCTURAL_READBACK_FAIL"),
+    ("empty_actor", "STRUCTURAL_READBACK_FAIL"),
+    ("unavailable", "STRUCTURAL_READBACK_INCOMPLETE"),
+])
+def test_saved_environment_mesh_is_checked_against_manifest(tmp_path, case, status):
+    _root, jobfile, candidate, fake, assets, actors = fixture(tmp_path)
+    manifest = json.loads((candidate / "automatic-setup.json").read_text())
+    path = "/Game/Auto/Tree"
+    manifest["actors"].append({
+        "name": "Tree", "label": "Tree", "kind": "entity.prop", "mesh_path": path,
+    })
+    manifest["imports"].append({"target_asset_path": path, "kind": "StaticMesh"})
+    _write(candidate / "automatic-setup.json", manifest)
+    (tmp_path / "Content" / "Auto" / "Tree.uasset").write_bytes(b"saved-native-package")
+    mesh = Asset("StaticMesh")
+    mesh.get_path_name = lambda: path + ".Tree"
+    assets[path] = mesh
+    wrong = Asset("StaticMesh")
+    wrong.get_path_name = lambda: "/Game/Auto/Rock.Rock"
+    actor = Actor("Tree", "Actor" if case == "empty_actor" else "StaticMeshActor")
+    fake.StaticMeshComponent = object()
+    if case != "unavailable":
+        actor.get_components_by_class = lambda cls: [
+            NS(get_editor_property=lambda name: wrong if case == "wrong_mesh" else mesh)]
+    actors.append(actor)
+    result = AUDIT.audit(jobfile, candidate / "mesh-audit.json", unreal_api=fake)
+    assert result["status"] == status
+    assert result["fidelity_verified"] is False

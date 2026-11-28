@@ -34,7 +34,11 @@ class Actor:
     def __init__(self,label=''):
         self.label=label
     def get_components_by_class(self,cls):
-        return [SimpleNamespace(get_skeletal_mesh_asset=lambda:self.mesh)] if hasattr(self,'mesh') else []
+        if not hasattr(self,'mesh'):
+            return []
+        if self.mesh.klass=='StaticMesh':
+            return [SimpleNamespace(get_editor_property=lambda name:self.mesh)]
+        return [SimpleNamespace(get_skeletal_mesh_asset=lambda:self.mesh)]
     def get_actor_label(self): return self.label
     def set_actor_label(self,label,mark_dirty=False): self.label=label
 
@@ -63,6 +67,7 @@ class FakeUnreal:
         self.FbxImportUI=Task
         self.FBXImportType=SimpleNamespace(FBXIT_ANIMATION=1,FBXIT_SKELETAL_MESH=2,FBXIT_STATIC_MESH=3)
         self.SkeletalMeshComponent=object()
+        self.StaticMeshComponent=object()
         self.CineCameraActor=object()
         self.PointLight=type('PointLight', (), {})
         self.SpotLight=type('SpotLight', (), {})
@@ -733,3 +738,56 @@ def test_spawned_wrong_mesh_stops_before_level_save(tmp_path):
     assert receipt["status"] == "PARTIAL_SETUP_MUST_INSPECT"
     assert receipt["failed_step"]["phase"] == "rig_identity_setup"
     assert not receipt["level_saved"]
+
+
+@pytest.mark.parametrize("case", ["valid", "wrong_mesh", "missing_api"])
+def test_imported_environment_prop_mesh_is_verified_before_save(tmp_path, case):
+    root, files = create(tmp_path)
+    csir = json.loads(files[0].read_text())
+    prop = next(row for row in csir["entities"] if row["ced_type"] == "entity.prop")
+    model = root / "Assets" / "Environment" / "Tree.fbx"
+    model.parent.mkdir()
+    model.write_bytes(b"tree-fbx")
+    prop["metadata"] = {"source_model_assets": [{
+        "asset_path": model.relative_to(root).as_posix(), "mesh_name": "Tree",
+        "renderer_path": prop["name"],
+    }]}
+    files[0].write_text(json.dumps(csir))
+    stage = studio_auto_assets.inspect(
+        *files, root, "Assets/Benchmark002", "/Game/CutSceneAI/AutoTransfer/T_TREE")
+    assert stage["ready"]
+    expected = next(row["mesh_path"] for row in stage["actors"] if row["name"] == prop["name"])
+    manifest = tmp_path / "setup.json"
+    manifest.write_text(json.dumps(stage))
+    project = tmp_path / "Target.uproject"
+    project.write_text("{}")
+    api = FakeUnreal(str(project))
+    original = api.actor_sys.spawn_actor_from_object
+
+    def spawn(obj, loc, rot):
+        actor = original(obj, loc, rot)
+        if case == "wrong_mesh" and obj.klass == "StaticMesh":
+            actor.mesh = Asset("StaticMesh", "/Game/Wrong")
+        return actor
+
+    api.actor_sys.spawn_actor_from_object = spawn
+    if case == "missing_api":
+        del api.StaticMeshComponent
+    output = tmp_path / "receipt.json"
+    kwargs = dict(csir_path=str(files[0]), mapping_path=str(files[1]), plan_path=str(files[2]),
+                  expected_project=str(project), expected_level="/Game/Tests/L_Test", unreal_api=api)
+    if case == "valid":
+        receipt = scene.run(str(manifest), str(output), **kwargs)
+        assert receipt["static_mesh_setup"][0]["expected_mesh_path"] == expected
+        assert receipt["static_mesh_setup"][0]["status"] == "PASS"
+    else:
+        with pytest.raises(ValueError):
+            scene.run(str(manifest), str(output), **kwargs)
+        receipt = json.loads(output.read_text())
+        assert not receipt["level_saved"]
+        if case == "missing_api":
+            assert receipt["status"] == "BLOCKED"
+            assert not api.assets and not api.actor_sys.actors
+        else:
+            assert receipt["status"] == "PARTIAL_SETUP_MUST_INSPECT"
+            assert receipt["failed_step"]["phase"] == "static_mesh_setup"

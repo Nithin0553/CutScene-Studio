@@ -187,6 +187,7 @@ def audit(job_path: str | Path, report_path: str | Path, *, unreal_api: Any = No
     light_rows = []
     rig_rows = []
     material_rows = []
+    static_mesh_rows = []
     for item in manifest.get("actors", []):
         label = str(item["label"])
         matches = by_label.get(label, [])
@@ -201,6 +202,16 @@ def audit(job_path: str | Path, report_path: str | Path, *, unreal_api: Any = No
         class_ok = len(matches) == 1 and actual in expected_classes
         if kind == "entity.light" and item.get("target_light_class"):
             class_ok = class_ok and actual == item["target_light_class"]
+        if kind == "entity.prop" and item.get("mesh_path"):
+            class_ok = class_ok and actual == "StaticMeshActor"
+            if class_ok:
+                adapter_dir = str(Path(__file__).resolve().parent)
+                if adapter_dir not in sys.path:
+                    sys.path.insert(0, adapter_dir)
+                import static_mesh_identity
+
+                measurement = static_mesh_identity.observe(matches[0], item["mesh_path"], api)
+                static_mesh_rows.append(dict(measurement, actor=label))
         if class_ok and item.get("light_setup"):
             tools_dir = str(Path(__file__).resolve().parents[2] / "tools")
             if tools_dir not in sys.path:
@@ -284,8 +295,8 @@ def audit(job_path: str | Path, report_path: str | Path, *, unreal_api: Any = No
     enumerable = sequence_rows["binding_count"] is not None and sequence_rows["root_track_count"] is not None
     native_status = (
         "FAIL" if not (level_disk and sequence_ok and all_assets and all_actors)
-        or any(row["status"] == "FAIL" for row in light_rows + rig_rows + material_rows)
-        else "INCOMPLETE" if not enumerable or any(row["status"] == "INCOMPLETE" for row in light_rows + rig_rows + material_rows)
+        or any(row["status"] == "FAIL" for row in light_rows + rig_rows + material_rows + static_mesh_rows)
+        else "INCOMPLETE" if not enumerable or any(row["status"] == "INCOMPLETE" for row in light_rows + rig_rows + material_rows + static_mesh_rows)
         else "PASS"
     )
     # Native persistence and historical source provenance are separate claims:
@@ -330,6 +341,10 @@ def audit(job_path: str | Path, report_path: str | Path, *, unreal_api: Any = No
         "MATERIAL_SLOT_READBACK_" + row["status"] + ": " + row["actor"]
         for row in material_rows if row["status"] != "PASS"
     )
+    native_issues.extend(
+        "STATIC_MESH_READBACK_" + row["status"] + ": " + row["actor"]
+        for row in static_mesh_rows if row["status"] != "PASS"
+    )
     if not level_disk:
         native_issues.append("SAVED_LEVEL_PACKAGE_MISSING")
     if not sequence_ok:
@@ -350,6 +365,7 @@ def audit(job_path: str | Path, report_path: str | Path, *, unreal_api: Any = No
         "level_file_exists": level_disk, "sequence": sequence_rows,
         "assets": rows, "actors": actor_rows, "static_light_properties": light_rows,
         "rig_identities": rig_rows, "material_slot_readback": material_rows,
+        "static_mesh_readback": static_mesh_rows,
         "asset_count": len(rows), "assets_class_and_disk_verified": len(found),
         "actor_count": len(actor_rows),
         "actors_unique_and_class_verified": actors_verified,

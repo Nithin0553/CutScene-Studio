@@ -83,6 +83,12 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-28 — Reject changed parent job before resolving candidate paths
+
+- Owner reported 236 passed, one failed in 136.89 seconds at 81abdc6. The parent-job tampering test raised KeyError on a missing candidate_id before checking the expected job hash, rather than the specified ValueError.
+- Check parent job hash and job identity immediately after reading the record, before deriving paths or opening session evidence. Validate candidate ID and directory type before resolving either candidate path. Added three malformed-child-record regression cases; existing parent tamper test unchanged. No thresholds, successful comparison logic or execution authorization changed.
+- New tests not run remotely. Rerun the focused repair outcome tests, then the preceding ten-module regression. No native evidence; keep engines/Ollama closed. Next UI integration after regression passes.
+
 ### 2026-11-28 — Repair outcome lint correction
 
 - Owner reported one PLC0414 diagnostic at 7ebc55d for the redundant write_new self-alias. Replaced it with a normal import and explicit public exports, retaining the write_new API used by the worker and tests. No comparison or execution behavior changed.

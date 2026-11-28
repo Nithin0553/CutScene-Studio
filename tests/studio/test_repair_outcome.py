@@ -172,3 +172,16 @@ def test_job_bound_comparison_rejects_detached_evidence(tmp_path, case):
         child["expected_level"] = parent["expected_level"]
     with pytest.raises(ValueError):
         outcome.compare_jobs(tmp_path, child, session, lineage)
+
+
+@pytest.mark.parametrize("case", ["missing_id", "missing_path", "invalid_id"])
+def test_malformed_child_candidate_rejected_before_path_resolution(tmp_path, case):
+    _parent, child, session, lineage = _job_pair(tmp_path)
+    if case == "missing_id":
+        del child["candidate_id"]
+    elif case == "missing_path":
+        del child["candidate_dir"]
+    else:
+        child["candidate_id"] = "../outside"
+    with pytest.raises(ValueError, match="Invalid repair outcome candidate identity"):
+        outcome.compare_jobs(tmp_path, child, session, lineage)

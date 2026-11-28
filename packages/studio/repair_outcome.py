@@ -159,8 +159,13 @@ def _diagnostic(candidate, job, session):
 
 def _candidate(folder, job):
     root = (folder / "candidates").resolve()
-    candidate = (root / job["candidate_id"]).resolve()
-    if candidate.parent != root or candidate != Path(job["candidate_dir"]).resolve():
+    candidate_id = job.get("candidate_id")
+    candidate_dir = job.get("candidate_dir")
+    if (not isinstance(candidate_id, str) or not re.fullmatch(r"[A-Za-z0-9_]{1,128}", candidate_id)
+            or not isinstance(candidate_dir, str) or not candidate_dir):
+        raise ValueError("Invalid repair outcome candidate identity.")
+    candidate = (root / candidate_id).resolve()
+    if candidate.parent != root or candidate != Path(candidate_dir).resolve():
         raise ValueError("Repair outcome candidate is outside workspace.")
     return candidate
 
@@ -172,12 +177,14 @@ def compare_jobs(folder, job, session, lineage):
     if not re.fullmatch(r"[0-9a-f]{32}", parent_id) or parent_id == job["job_id"]:
         raise ValueError("Invalid repair comparison parent.")
     parent, parent_hash = snapshot(folder / "jobs" / (parent_id + ".json"))
+    if parent_hash != lineage["parent_job_sha256"] or parent.get("job_id") != parent_id:
+        raise ValueError("Repair outcome parent job identity or hash changed.")
     parent_dir = _candidate(folder, parent)
     child_dir = _candidate(folder, job)
     baseline, baseline_hash = snapshot(parent_dir / "session.json")
     child_session, child_hash = snapshot(child_dir / "session.json")
-    if (parent_hash != lineage["parent_job_sha256"] or baseline_hash != lineage["parent_session_sha256"]
-            or parent["job_id"] != parent_id or parent_dir.name != lineage["parent_candidate_id"]
+    if (baseline_hash != lineage["parent_session_sha256"]
+            or parent_dir.name != lineage["parent_candidate_id"]
             or child_dir.name != lineage["child_candidate_id"] or child_session != session
             or job["expected_level"] != lineage["target_level"]
             or parent["expected_level"] == job["expected_level"]

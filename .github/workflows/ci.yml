@@ -22,9 +22,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: python -m pip install "pytest>=8,<9" "ruff>=0.7" "jsonschema>=4.23,<5" "pydantic>=2.8,<3" "pyyaml>=6,<7"
+      - run: python -m pip install "pytest>=8,<9" "ruff>=0.7" "jsonschema>=4.23,<5" "pydantic>=2.8,<3" "pyyaml>=6,<7" "langgraph>=1,<2"
+      - run: python -c "import langgraph.graph, langsmith"
       - run: python -m compileall -q packages tools integrations/unreal
-      - run: python -m pytest -q
+      - run: python -m pytest -q -rs
       - run: node --check apps/studio-web/app.js
       - run: node --check apps/studio-web/cinematic.js
       - run: node tests/studio/test_cinematic_ui.cjs

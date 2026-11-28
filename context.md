@@ -23,11 +23,11 @@ Resume prompt: "Read context.md and AGENTS.md from Nithin0553/CutScene-Studio on
 
 ## 3. Product direction and constraints
 
-Build a reliable local Unity Timeline to Unreal Level Sequence transfer Studio. On 2026-11-26 the owner explicitly approved the single-agent Ollama + LangGraph architecture below, superseding the previous no-agent product direction. Preserve the existing deterministic execution backend as the foundation and regression baseline; no cloud API or learning/dataset collection is required. The current implementation remains deterministic until the approved integration is implemented and verified.
+Build a reliable local Unity Timeline to Unreal Level Sequence transfer Studio. On 2026-11-26 the owner explicitly approved the single-agent Ollama + LangGraph architecture below, superseding the previous no-agent product direction. Preserve the existing deterministic execution backend as the foundation and regression baseline; no cloud API or learning/dataset collection is required. The optional single-agent software workflow is implemented on this branch, including bounded skeletal-root repair; deterministic native execution remains authoritative. Full current-branch regression and real-engine acceptance remain outstanding.
 
 First release is scoped to the cinematic elements of Benchmark 001 and 002. Avoid benchmark-name-specific logic, assumptions about scene names, or fixed private paths. Use the source as authoritative. Keep the UI clean, minimal and responsive with meaningful progress animation. Do not emit unnecessary files, commit generated artifacts, overwrite existing target sequences, or restart engines repeatedly. Explicit editor approval, source asset-copy rights, backed-up target projects and guarded native execution remain required.
 
-### Approved target architecture (mandatory; not yet integrated)
+### Approved architecture (mandatory; software integrated, native acceptance pending)
 
 Approved by the user on 2026-11-26 from the supplied "Proposed CutSceneAI architecture" diagram. This is the sole architectural baseline for CutScene Studio. Do not introduce alternative architectures, additional agents, or change component responsibilities or connections without explicit user approval.
 
@@ -64,7 +64,7 @@ flowchart TD
 ### Component responsibilities and interfaces
 
 - **CutSceneAI Studio:** the user-facing interface for connecting engines and starting transfers; displays progress, diagnostics and validation results.
-- **Single AI Transfer Agent:** the only AI agent. Ollama + a local LLM provide analysis, reasoning, planning and repair decisions. LangGraph / Python orchestrates controlled tool execution. Use a configurable local Ollama API (default http://localhost:11434); model choice is pending hardware and capability verification.
+- **Single AI Transfer Agent:** the only AI agent. Ollama + a local LLM provide analysis, reasoning, planning and repair decisions. LangGraph / Python orchestrates controlled tool execution. Use a configurable local Ollama API (default http://localhost:11434); the current local provider default is qwen2.5:7b-instruct; native end-to-end behavior remains unverified.
 - **Mapping resources:** RAG / retrieval of relevant engine conversion knowledge, preferring exact component and version matches before optional semantic retrieval. Inspect prior mappings before reusing them.
 - **CSIR + CED:** engine-independent cutscene representation and conversion rules/coverage. Source census can support extraction and coverage within these existing responsibilities; it is not an additional architectural layer.
 - **CineTwin:** source-to-target validation and discrepancy evidence for bounded repair; validation feedback returns to the same single agent through controlled tools.
@@ -79,9 +79,16 @@ flowchart TD
 - The agent selects grounded conversion strategies, invokes allowlisted tools and proposes supported repairs. Deterministic calculations, conversion, validation and editor mutations remain in the backend and engine adapters.
 - Validate tool arguments and transfer plans, retain provenance, bound repair attempts, and explicitly report unsupported or partial conversions. Avoid arbitrary generated code execution and unintended changes to source projects.
 - Preserve the diagram's named components and topology. Implementation details may evolve within their responsibilities; architectural changes require explicit user approval and a context.md update.
-- Existing deterministic components on this feature branch must be inspected and reused where suitable; the Ollama/LangGraph integration is not yet verified.
+- Existing deterministic components on this feature branch must be inspected and reused where suitable; targeted Ollama/LangGraph software checks have passed; full current-branch regression and native acceptance are distinct.
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
+
+### 2026-11-28 — Repair UI regression passed; full software verification checkpoint
+
+- Owner confirmed all UI and Python integration checks passed at c45c78f (exact Python count not supplied; Node suite contains 26 scenarios). Draft PR #1 remains open; no current workflow runs returned. Latest complete confirmed Python baseline remains 822 passed / seven historical external Stage 4 fixture skips; later targeted regressions do not establish current full-suite counts.
+- Audited installer, CI and maintained documentation. CI omitted optional LangGraph dependency, allowing AI tests to skip. Add LangGraph install/import gate to existing Windows/Ubuntu CI and report pytest skip reasons. Windows installer gains -Agent and -StorageRoot; -Dev also installs/verifies agent dependencies. Configure pip cache and temp before venv creation or installation under chosen storage root (default checkout parent). No dependency/model download performed in this session. Existing default deterministic install remains available.
+- Updated README and contributing guidance for optional single-agent workflow, inspection/approval, one bounded skeletal-root repair and current native acceptance limitations. No engine or transfer algorithm changes. Full suite must run with LangGraph present, editors/Ollama closed, exact branch revision, compileall, pytest -rs, Node syntax/UI, Ruff tests and repository hygiene. Check skip reasons and record actual output; no release or native fidelity claim.
+- Next: full local verification, resolve any regression before remaining semantic coverage audit and explicit native Benchmark 001/002 acceptance. No new local suite executed remotely.
 
 ### 2026-11-28 — Repair comparison regression passed; cinematic UI repair workflow
 
@@ -686,7 +693,9 @@ Owner requested a literature and working-model feasibility review, not implement
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\install_studio.ps1 -Dev
-.\.venv-studio\Scripts\python.exe -m pytest -q
+.\.venv-studio\Scripts\python.exe -c "import langgraph.graph, langsmith"
+.\.venv-studio\Scripts\python.exe -m compileall -q packages tools integrations/unreal
+.\.venv-studio\Scripts\python.exe -m pytest -q -rs
 .\.venv-studio\Scripts\python.exe -m ruff check tests
 node --check apps/studio-web/app.js
 node --check apps/studio-web/cinematic.js

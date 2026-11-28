@@ -15,7 +15,7 @@ Read [context.md](context.md) and [AGENTS.md](AGENTS.md) before every change. Th
 - Preserve source CSIR, benchmark freezes, Unity assets and existing Unreal targets.
 - Require explicit asset rights, target identity, guarded execution and non-overwrite behavior.
 - Avoid hardcoded private paths, generated evidence, exported media and secrets in Git.
-- Do not introduce AI/learning in the default transfer pipeline or silently skip unsupported components.
+- Preserve the optional single local Ollama/LangGraph agent, deterministic backend and explicit execution authorization. Do not introduce extra agents, unapproved learning or silently skip unsupported components.
 - Keep the user-facing README current; mark historical documentation as historical where relevant.
 - Record failures and incomplete measurements honestly; generation is not proof of fidelity.
 - Do not delete branches or historical evidence without provenance review and explicit approval.

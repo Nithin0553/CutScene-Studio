@@ -95,6 +95,9 @@ def propose(folder: Path, job_id: str, agent: TransferAgent, *, verify_candidate
     if candidate.resolve().parent != root or Path(job["candidate_dir"]).resolve() != candidate.resolve():
         raise ValueError("Repair candidate path differs from the active job.")
     session = verify_candidate(candidate)
+    mapping, _ = _snapshot(Path(session["target"]["mapping_path"])) if "mapping_path" in session["target"] else ({}, "")
+    if "studio_repair_lineage" in mapping:
+        raise ValueError("Repair lineage budget exhausted.")
     _, session_hash = _snapshot(candidate / "session.json")
     plan, plan_hash = _snapshot(candidate / "transfer-plan.json")
     setup, setup_hash = _snapshot(candidate / "automatic-setup.json")

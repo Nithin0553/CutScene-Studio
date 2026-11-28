@@ -365,7 +365,8 @@ def _execute(job):
         job['generation_readback_error'] = str(exc)
         unreal.log_warning('[CutSceneAI Studio] Generation readback unavailable: ' +
                            str(exc))
-    job['repair_feedback_ready'] = bool(ai and job.get('closed_loop_report_sha256'))
+    job['repair_feedback_ready'] = bool(ai and job.get('closed_loop_report_sha256')
+                                        and 'studio_repair_lineage' not in _load(Path(job['mapping'])))
     return job
 
 

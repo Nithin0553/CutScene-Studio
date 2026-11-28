@@ -914,6 +914,55 @@ def propose_ai_repair(job_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
     return propose(folder, job_id, TransferAgent(OllamaProvider()), verify_candidate=verify)
 
 
+def prepare_ai_repair(job_id: str, level: str, folder: Path = WORKSPACE) -> dict[str, Any]:
+    """Prepare a distinct repair handoff; normal inspection/approval still required."""
+    for path in (ROOT, ROOT / 'packages/studio', ROOT / 'packages/cinetwin', ROOT / 'integrations/unreal'):
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+    import prepared_transfer
+    import studio_auto_assets
+    from packages.studio.repair_candidate import prepare as prepare_repair
+
+    config = load_json(folder / 'connection.json')
+    if config.get('source_rights_confirmed') is not True:
+        raise ValueError('Confirm source asset-copy rights first.')
+    fresh_config = config_check({**config, 'level_path': level, 'auto_create_level': False})
+    if not (Path(config['target_project']).parent / 'Content' / (level[6:] + '.umap')).is_file():
+        raise ValueError('Select a separate saved staging map in the same project.')
+
+    def verify_parent(candidate):
+        session = prepared_transfer.verify(candidate)
+        if (session['source']['csir_path'] != config['csir']
+                or session['target']['project_path'] != config['target_project']
+                or not session['source_capture'] or session['source_capture']['path'] != config['capture']):
+            raise ValueError('Repair source or target differs from current connection.')
+        studio_auto_assets.verify(candidate / 'automatic-setup.json', config['csir'],
+                                  session['target']['mapping_path'], candidate / 'transfer-plan.json')
+        return session
+
+    child, mapping_path, session, setup = prepare_repair(
+        folder, job_id, 'repair_' + uuid.uuid4().hex[:12], level,
+        verify_parent=verify_parent, prepare_transfer=prepared_transfer.prepare,
+        inspect_setup=studio_auto_assets.inspect)
+    if prepared_transfer.verify(child) != session:
+        raise ValueError('Repair candidate replay differs.')
+    studio_auto_assets.verify(child / 'automatic-setup.json', config['csir'], mapping_path,
+                              child / 'transfer-plan.json')
+    info = {'candidate_id': child.name, 'candidate_dir': str(child), 'mapping_copy': str(mapping_path),
+            'sequence_path': session['target']['sequence_asset_path'],
+            'automatic_setup': {'available': True, 'ready': True, 'blockers': [],
+                                'warnings': setup['warnings'], 'planned_imports': len(setup['imports']),
+                                'planned_actors': len(setup['actors'])},
+            'ai_analysis': {'status': 'PREPARED_ADVISORY', 'execution_enabled': False},
+            'repair_lineage': load_json(mapping_path)['studio_repair_lineage'],
+            'engine_generation_executed': False, 'behavioral_fidelity_established': False}
+    atomic_json(folder / 'connection.json', fresh_config)
+    atomic_json(folder / 'active-candidate.json', info)
+    (folder / 'destination-readiness.json').unlink(missing_ok=True)
+    (folder / 'active-job.json').unlink(missing_ok=True)
+    return info
+
+
 def diagnostic_summary(job_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
     job = job_status(job_id, folder)
     path_str = job.get('diagnostic_file')
@@ -1184,6 +1233,8 @@ def create_handler(webroot: Path, folder: Path = WORKSPACE):
                         result = request_ai_native_preflight(str(data.get('candidate_id', '')), folder)
                     elif route == '/api/propose-ai-repair':
                         result = propose_ai_repair(str(data.get('job_id', '')), folder)
+                    elif route == '/api/prepare-ai-repair':
+                        result = prepare_ai_repair(str(data.get('job_id', '')), str(data.get('level', '')), folder)
                     elif route == '/api/approve-ai-execution':
                         result = approve_ai_execution(str(data.get('candidate_id', '')),
                                                       str(data.get('request_id', '')),

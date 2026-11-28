@@ -323,4 +323,8 @@ def verify(output_dir: str | Path) -> dict[str, Any]:
     if (session.get("engine_generation_executed") is not False
         or session.get("learning_applied") is not False):
         raise PreparedTransferError("Prepared handoff cannot assert execution or learned action.")
+    if "studio_repair_lineage" in _read(map_path):
+        from packages.studio.repair_candidate import verify_child
+
+        verify_child(folder, session, verify)
     return session

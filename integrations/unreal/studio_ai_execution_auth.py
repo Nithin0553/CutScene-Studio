@@ -136,6 +136,10 @@ def binding(folder, candidate_id, worker_instance, worker_hash):
             or os.path.normcase(str(report.get('observed_project') or '')) != os.path.normcase(config['target_project'])
             or not level_binding_matches(config, request, report)):
         raise ValueError('Inspected session or destination changed.')
+    mapping, _ = snapshot(Path(target['mapping_path']))
+    lineage = mapping.get('studio_repair_lineage')
+    if lineage is not None and (config.get('auto_create_level') or lineage.get('target_level') != config['level_path']):
+        raise ValueError('Repair execution requires its separate approved staging level.')
     artifacts = session['artifact_sha256']
     if (set(artifacts) != {'ai-handoff.json', 'coverage-report.json', 'evidence.json', 'transfer-plan.json'}
             or artifacts != report.get('artifact_sha256')

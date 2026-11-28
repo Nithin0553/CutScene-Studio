@@ -285,6 +285,9 @@ def run(
         raise ParityDiagnosticError("Target Level Sequence missing: " + sequence_path)
     if mapping.get("overwrite_sequence") is True:
         raise ParityDiagnosticError("Unsafe mapping requests sequence overwrite.")
+    target_rate = sequence.get_display_rate()
+    target_level = str(unreal_api.get_editor_subsystem(
+        unreal_api.UnrealEditorSubsystem).get_editor_world().get_path_name()).split(".", 1)[0]
     playback_frames, excluded_boundary_frames = _active_playback_frames(
         source_frames, int(sequence.get_playback_start()),
         int(sequence.get_playback_end()),
@@ -349,6 +352,7 @@ def run(
                 entity_report[name]["source_root_bone_id"] = bone_id
                 records[name]["root_bone"].append({
                     "frame": frame, "source_cm": source_bone,
+                    "source_bone_id": bone_id, "target_bone_name": bone_name,
                     "target_cm": _vec(mesh.get_socket_location(bone_name)),
                 })
             if frame == playback_frames[0]:
@@ -400,6 +404,9 @@ def run(
         "target": {
             "project": str(unreal_api.Paths.get_project_file_path()),
             "sequence_path": sequence.get_path_name(),
+            "level": target_level,
+            "display_rate": {"numerator": int(target_rate.numerator),
+                             "denominator": int(target_rate.denominator)},
             "sequence_playback_frames": [
                 sequence.get_playback_start(), sequence.get_playback_end()
             ],

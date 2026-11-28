@@ -270,9 +270,10 @@ def _execute(job):
         )
         after = set(candidate_dir.glob('CineTwin_WorldPose_Diagnosis_*.json'))
         created = sorted(after - before)
-        if not created or report.get('kind') != 'cutsceneai.cinetwin.unreal_world_pose_diagnostic':
+        if len(created) != 1 or report.get('kind') != 'cutsceneai.cinetwin.unreal_world_pose_diagnostic':
             raise RuntimeError('Diagnostic returned without the expected report.')
-        job['diagnostic_file'] = str(created[-1])
+        job['diagnostic_file'] = str(created[0])
+        job['diagnostic_sha256'] = hashlib.sha256(created[0].read_bytes()).hexdigest()
         cine_report = report
         job['status'] = 'GENERATED_AND_MEASURED_NOT_FIDELITY_VERIFIED'
     except Exception as exc:
@@ -365,8 +366,22 @@ def _execute(job):
         job['generation_readback_error'] = str(exc)
         unreal.log_warning('[CutSceneAI Studio] Generation readback unavailable: ' +
                            str(exc))
-    job['repair_feedback_ready'] = bool(ai and job.get('closed_loop_report_sha256')
-                                        and 'studio_repair_lineage' not in _load(Path(job['mapping'])))
+    lineage = _load(Path(job['mapping'])).get('studio_repair_lineage') if ai else None
+    job['repair_feedback_ready'] = bool(ai and job.get('closed_loop_report_sha256') and lineage is None)
+    if lineage is not None:
+        job['repair_outcome_status'] = 'INCOMPLETE'
+        try:
+            from packages.studio import repair_outcome
+
+            outcome = repair_outcome.compare_jobs(WORKSPACE, job, prepared, lineage)
+            outcome_path = candidate_dir / ('repair-outcome-' + job['job_id'] + '.json')
+            repair_outcome.write_new(outcome_path, outcome)
+            job['repair_outcome_status'] = outcome['status']
+            job['repair_outcome_file'] = str(outcome_path)
+            job['repair_outcome_sha256'] = hashlib.sha256(outcome_path.read_bytes()).hexdigest()
+        except Exception as exc:
+            job['repair_outcome_error'] = str(exc)
+            unreal.log_warning('[CutSceneAI Studio] Repair comparison incomplete: ' + str(exc))
     return job
 
 

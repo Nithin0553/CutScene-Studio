@@ -867,6 +867,7 @@ def job_status(job_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
         'visual_audit_status', 'visual_audit_error', 'closed_loop_status',
         'closed_loop_report_file', 'closed_loop_error', 'repair_iterations',
         'repair_changes', 'repair_status', 'repair_error',
+        'repair_feedback_ready', 'repair_outcome_status', 'repair_outcome_error',
         'execution_stage', 'failure_stage')}
     # Read only the exact receipt belonging to this job's candidate.
     # Expose the actionable failed operation without publishing a traceback
@@ -961,6 +962,32 @@ def prepare_ai_repair(job_id: str, level: str, folder: Path = WORKSPACE) -> dict
     (folder / 'destination-readiness.json').unlink(missing_ok=True)
     (folder / 'active-job.json').unlink(missing_ok=True)
     return info
+
+
+def repair_outcome_summary(job_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
+    """Read the exact immutable comparison, not a user-selected file."""
+    status = job_status(job_id, folder)
+    job = load_json(folder / 'jobs' / (job_id + '.json'))
+    root = (folder / 'candidates').resolve()
+    candidate = (root / str(job['candidate_id'])).resolve()
+    path = candidate / ('repair-outcome-' + job_id + '.json')
+    if candidate.parent != root or candidate != Path(job['candidate_dir']).resolve():
+        raise ValueError('Unsafe repair outcome candidate.')
+    if not job.get('repair_outcome_file'):
+        return {'available': False, 'status': status.get('repair_outcome_status') or 'NOT_AVAILABLE',
+                'fidelity_verified': False}
+    if (path.resolve().parent != candidate or Path(job['repair_outcome_file']).resolve() != path.resolve()
+            or path.stat().st_size > 8 * 1024 * 1024):
+        raise ValueError('Unsafe repair outcome file.')
+    raw = path.read_bytes()
+    report = json.loads(raw)
+    if (hashlib.sha256(raw).hexdigest() != job.get('repair_outcome_sha256')
+            or report.get('kind') != 'cutsceneai.studio.repair_outcome'
+            or report.get('child_job_id') != job_id
+            or report.get('status') != status.get('repair_outcome_status')
+            or report.get('fidelity_verified') is not False):
+        raise ValueError('Repair outcome identity or evidence changed.')
+    return {'available': True, **report}
 
 
 def diagnostic_summary(job_id: str, folder: Path = WORKSPACE) -> dict[str, Any]:
@@ -1130,6 +1157,11 @@ def create_handler(webroot: Path, folder: Path = WORKSPACE):
                     return self.reply(200, job_status(path.rsplit('/', 1)[-1], folder))
                 except (ValueError, TypeError) as e:
                     return self.reply(404, {'error': str(e)})
+            if path.startswith('/api/repair-outcome/'):
+                try:
+                    return self.reply(200, repair_outcome_summary(path.rsplit('/', 1)[-1], folder))
+                except (ValueError, TypeError, KeyError, OSError) as e:
+                    return self.reply(409, {'error': str(e)})
             if path.startswith('/api/diagnostic/'):
                 try:
                     return self.reply(200, diagnostic_summary(path.rsplit('/', 1)[-1], folder))

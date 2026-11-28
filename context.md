@@ -83,6 +83,13 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-28 — Repair candidate regression passed; independent before/after motion comparison
+
+- Owner confirmed all checks passed at 39e78bc (exact count not supplied). PR #1 draft; no CI runs.
+- Native CineTwin diagnostic records actual target display rate/level and per-frame source/target root bone identity, with exact diagnostic file hash stored in job. New repair_outcome comparator recomputes maximum absolute and offset-removed position errors from raw frame samples, not summary claims. Requires matching source and frame coverage, exact unique actor correspondence, stable same bone identities, source positions, finite observations and actual display rate. Regressions in any measured domain take precedence, missing evidence is INCOMPLETE, all selected roots must improve by >0.01 cm with no measured max-error regression >0.01 cm. Positive motion outcome additionally requires child native structure/hierarchy PASS. No pixel/pose/audio/event/restart/runtime claim. No automatic retry.
+- Worker compares original and repair job diagnostics after generation-time native audits using bound lineage, session, plan and diagnostic hashes; persists new immutable report or incomplete reason. Host exposes exact hash-checked report at GET /api/repair-outcome/<job_id> and status in job response. Original evidence unchanged. Legacy diagnostics without newly recorded frame/bone/rate identity or hashes cannot support this outcome.
+- Added 17 pure comparison cases. Not executed remotely. Run repair, CineTwin diagnosis, generation readback, host and planner-sync regression. Next add file-backed outcome/host regression and complete UI repair flow; full regression and native acceptance remain pending. Keep engines/Ollama closed.
+
 ### 2026-11-28 — Repair feedback regression passed; fresh skeletal-root repair candidate
 
 - Owner confirmed all checks passed at 18e2c04 (exact count not supplied). Draft PR #1 remains open; no CI runs.

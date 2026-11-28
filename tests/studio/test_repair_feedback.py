@@ -19,8 +19,10 @@ def fixture(tmp_path):
     job_id = "a" * 32
     candidate = tmp_path / "candidates" / "fresh"
     plan_hash = write(candidate / "transfer-plan.json", {"bindings": {"Hero": "CSAI_Hero"}})
+    mapping_path = candidate / "mapping.json"
+    write(mapping_path, {})
     session = {"ai_analysis": {"sha256": "evidence"}, "artifact_sha256": {"transfer-plan.json": plan_hash},
-               "target": {"sequence_asset_path": "/Game/Sequence"}}
+               "target": {"sequence_asset_path": "/Game/Sequence", "mapping_path": str(mapping_path)}}
     session_hash = write(candidate / "session.json", session)
     write(candidate / "automatic-setup.json", {"actors": [], "source_albedo_actor_candidates": {}})
     binding = {"job_id": job_id, "candidate_id": "fresh", "sequence_path": "/Game/Sequence",

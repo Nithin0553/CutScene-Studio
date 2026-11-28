@@ -18,7 +18,10 @@ ROOT_LOCK = "enable_cinetwin_skeletal_world_lock"
 
 def snapshot(path):
     raw = Path(path).read_bytes()
-    return json.loads(raw), hashlib.sha256(raw).hexdigest()
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise TypeError("Repair evidence must be a JSON object.")
+    return value, hashlib.sha256(raw).hexdigest()
 
 
 def write_new(path, value):
@@ -187,9 +190,12 @@ def prepare(folder, job_id, child_id, level, *, verify_parent, prepare_transfer,
     mapping, namespace = derive(evidence, child_id, level)
     child = _candidate(root, child_id)
     mapping_path = child.with_suffix(".mapping.json")
-    if child.exists() or mapping_path.exists():
+    if child.exists() or mapping_path.exists() or mapping_path.is_symlink():
         raise ValueError("Fresh repair candidate already exists.")
-    write_new(evidence["parent"] / "repair-attempt.json", mapping[LINEAGE])
+    claim = evidence["parent"] / "repair-attempt.json"
+    if claim.exists() or claim.is_symlink():
+        raise ValueError("Repair attempt budget already consumed.")
+    write_new(claim, mapping[LINEAGE])
     write_new(mapping_path, mapping)
     parent = evidence["session"]
     session = prepare_transfer(parent["source"]["csir_path"], mapping_path, child,

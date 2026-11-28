@@ -12,9 +12,9 @@ class StaticMeshIdentityError(ValueError):
 
 def preflight(manifest, api):
     """Check required reflected component type before importing or spawning."""
-    if any(row.get("mesh_path") for row in manifest["actors"]):
-        if getattr(api, "StaticMeshComponent", None) is None:
-            raise StaticMeshIdentityError("StaticMeshComponent API unavailable.")
+    if (any(row.get("mesh_path") for row in manifest["actors"])
+            and getattr(api, "StaticMeshComponent", None) is None):
+        raise StaticMeshIdentityError("StaticMeshComponent API unavailable.")
 
 
 def _identity(asset):

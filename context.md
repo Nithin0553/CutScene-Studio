@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-27 — Static mesh preflight lint correction
+
+- Owner reported one SIM102 diagnostic at 0dd9ebe. Combined the nested component availability check into a single short-circuiting condition; behavior, validation safeguards and native mutation boundaries unchanged.
+- No environment regression result supplied yet. Rerun the preceding four-file Ruff and eight-module regression commands; engines and Ollama remain closed.
+
 ### 2026-11-27 — Material regression passed; native environment mesh identity
 
 - Owner confirmed all checks passed at 4d361ec (exact count not supplied). Prior explicit 224 conversion and 252 host/provider counts, Node 23; PR #1 open draft.

@@ -6,7 +6,8 @@ import ntpath
 import re
 from pathlib import Path
 
-from packages.studio.repair_candidate import snapshot, write_new
+from packages.studio.repair_candidate import snapshot
+from packages.studio.repair_candidate import write_new as write_new
 
 EPSILON_CM = 0.01
 MAX_FRAMES = 3000
@@ -25,7 +26,7 @@ def _samples(rows, frames, *, skeletal):
         raise ValueError("Incomplete native pose samples.")
     source, target, bones = [], [], set()
     for row, frame in zip(rows, frames, strict=True):
-        if type(row.get("frame")) is not int or row["frame"] != frame:
+        if not isinstance(row, dict) or type(row.get("frame")) is not int or row["frame"] != frame:
             raise ValueError("Native pose frame identity differs.")
         source.append(_position(row["source_cm"]))
         target.append(_position(row["target_cm"]))
@@ -89,15 +90,18 @@ def compare(before, after, *, bindings, selected, skeletal_entities):
 
     for name, label in sorted(bindings.items()):
         a, b = before["entities"][name], after["entities"][name]
-        if (any(row.get("status") != "READY" or row.get("actor_match_count") != 1
+        if (any(not isinstance(row, dict) or row.get("status") != "READY"
+                or type(row.get("actor_match_count")) is not int or row["actor_match_count"] != 1
                 or row.get("target_actor_label") != label for row in (a, b))
                 or not a.get("source_entity_id") or a["source_entity_id"] != b.get("source_entity_id")):
             incomplete.append(name + ": actor correspondence unavailable")
             continue
         for domain in ("actor", "root_bone"):
             skeletal = domain == "root_bone"
-            first = before["frames"][name].get(domain)
-            second = after["frames"][name].get(domain)
+            first_record = before["frames"][name]
+            second_record = after["frames"][name]
+            first = first_record.get(domain) if isinstance(first_record, dict) else None
+            second = second_record.get(domain) if isinstance(second_record, dict) else None
             if skeletal and name not in skeletal_entities and first == [] and second == []:
                 continue
             try:
@@ -190,12 +194,15 @@ def compare_jobs(folder, job, session, lineage):
     result = compare(before, after, bindings=plan["bindings"], selected=lineage["entities"],
                      skeletal_entities=skeletal)
     # Even favorable motion measurements cannot establish native structure.
-    native = {key: job.get(key) for key in ("generation_readback_status", "generation_hierarchy_status")}
-    if "FAIL" in native.values():
+    keys = ("generation_readback_status", "generation_hierarchy_status")
+    native = {"parent": {key: parent.get(key) for key in keys},
+              "child": {key: job.get(key) for key in keys}}
+    if "FAIL" in native["child"].values():
         result["status"] = "REGRESSION_DETECTED"
-    elif result["status"] == "MEASURED_ROOT_MOTION_IMPROVED" and set(native.values()) != {"PASS"}:
+    elif (result["status"] == "MEASURED_ROOT_MOTION_IMPROVED"
+          and any(set(side.values()) != {"PASS"} for side in native.values())):
         result["status"] = "INCOMPLETE"
-        result["incomplete"].append("Repair native structure or hierarchy readback not passed.")
+        result["incomplete"].append("Original or repaired native structure/hierarchy readback not passed.")
     return {"kind": "cutsceneai.studio.repair_outcome", "schema_version": "0.1.0",
             "parent_job_id": parent_id, "child_job_id": job["job_id"],
             "parent_session_sha256": baseline_hash, "child_session_sha256": child_hash,

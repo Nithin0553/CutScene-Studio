@@ -286,6 +286,10 @@ def run(
     if mapping.get("overwrite_sequence") is True:
         raise ParityDiagnosticError("Unsafe mapping requests sequence overwrite.")
     target_rate = sequence.get_display_rate()
+    target_project = str(unreal_api.Paths.get_project_file_path())
+    full_path = getattr(unreal_api.Paths, "convert_relative_path_to_full", None)
+    if callable(full_path):
+        target_project = str(full_path(target_project))
     target_level = str(unreal_api.get_editor_subsystem(
         unreal_api.UnrealEditorSubsystem).get_editor_world().get_path_name()).split(".", 1)[0]
     playback_frames, excluded_boundary_frames = _active_playback_frames(
@@ -402,7 +406,7 @@ def run(
             "fps": fps,
         },
         "target": {
-            "project": str(unreal_api.Paths.get_project_file_path()),
+            "project": target_project,
             "sequence_path": sequence.get_path_name(),
             "level": target_level,
             "display_rate": {"numerator": int(target_rate.numerator),

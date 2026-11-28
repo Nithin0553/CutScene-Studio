@@ -1295,3 +1295,26 @@ def test_ai_model_memory_status_endpoint_is_read_only(ai_execution_fixture):
     assert result['ready'] is True
     assert not (f.work / f.auth.APPROVAL_FILE).exists()
     assert not (f.work / 'active-job.json').exists()
+
+
+def test_repair_outcome_endpoint_checks_exact_report_hash(service):
+    base, tmp = service
+    folder = tmp / 'work'
+    job_id = 'd' * 32
+    candidate = folder / 'candidates' / 'repair_fixture'
+    candidate.mkdir(parents=True)
+    (folder / 'jobs').mkdir()
+    report = {'kind': 'cutsceneai.studio.repair_outcome', 'child_job_id': job_id,
+              'status': 'MEASURED_ROOT_MOTION_IMPROVED', 'fidelity_verified': False}
+    path = candidate / ('repair-outcome-' + job_id + '.json')
+    path.write_text(json.dumps(report), encoding='utf-8')
+    job = {'job_id': job_id, 'candidate_id': candidate.name, 'candidate_dir': str(candidate),
+           'repair_outcome_file': str(path), 'repair_outcome_status': report['status'],
+           'repair_outcome_sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+    (folder / 'jobs' / (job_id + '.json')).write_text(json.dumps(job), encoding='utf-8')
+    status, body = call(base + '/api/repair-outcome/' + job_id)
+    assert status == 200 and body['available'] is True
+    assert body['fidelity_verified'] is False
+    path.write_text('{}', encoding='utf-8')
+    status, body = call(base + '/api/repair-outcome/' + job_id)
+    assert status == 409 and 'changed' in body['error']

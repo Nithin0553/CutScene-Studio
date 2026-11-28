@@ -95,3 +95,80 @@ def test_comparison_preserves_evidence_and_never_overwrites(tmp_path):
     outcome.write_new(path, result)
     with pytest.raises(FileExistsError):
         outcome.write_new(path, result)
+
+
+def _job_pair(folder):
+    from packages.studio.repair_candidate import snapshot, write_new
+
+    (folder / "jobs").mkdir()
+    jobs = []
+    sessions = []
+    for name, job_id, error in (("original", "a" * 32, 8), ("repair", "b" * 32, 1)):
+        candidate = folder / "candidates" / name
+        candidate.mkdir(parents=True)
+        plan = {"bindings": {"Hero": "Hero"}, "actions": [
+            {"kind": "skeletal_animation", "entity_name": "Hero"}]}
+        write_new(candidate / "transfer-plan.json", plan)
+        _, plan_hash = snapshot(candidate / "transfer-plan.json")
+        session = {"source": {"sha256": "source"}, "source_capture": {"sha256": "capture"},
+                   "cutscene_id": "scene", "target": {"mapping_sha256": name,
+                   "sequence_asset_path": "/Game/" + name, "project_path": "/project/Game.uproject"},
+                   "artifact_sha256": {"transfer-plan.json": plan_hash}}
+        write_new(candidate / "session.json", session)
+        diagnostic = report(error)
+        diagnostic["kind"] = "cutsceneai.cinetwin.unreal_world_pose_diagnostic"
+        diagnostic["source"]["mapping_sha256"] = name
+        diagnostic["target"].update(sequence_path="/Game/" + name + "." + name,
+                                    level="/Game/Level_" + name, project="/project/Game.uproject")
+        path = candidate / "CineTwin_WorldPose_Diagnosis_20261128T000000Z.json"
+        write_new(path, diagnostic)
+        _, digest = snapshot(path)
+        job = {"job_id": job_id, "candidate_id": name, "candidate_dir": str(candidate),
+               "expected_level": "/Game/Level_" + name, "expected_project": "/project/Game.uproject",
+               "sequence_path": "/Game/" + name, "diagnostic_file": str(path),
+               "diagnostic_sha256": digest, "generation_readback_status": "PASS",
+               "generation_hierarchy_status": "PASS"}
+        write_new(folder / "jobs" / (job_id + ".json"), job)
+        jobs.append(job)
+        sessions.append(session)
+    _, parent_hash = snapshot(folder / "jobs" / ("a" * 32 + ".json"))
+    _, session_hash = snapshot(folder / "candidates" / "original" / "session.json")
+    lineage = {"parent_job_id": jobs[0]["job_id"], "parent_job_sha256": parent_hash,
+               "parent_session_sha256": session_hash, "parent_candidate_id": "original",
+               "child_candidate_id": "repair", "target_level": "/Game/Level_repair",
+               "entities": ["Hero"]}
+    return jobs[0], jobs[1], sessions[1], lineage
+
+
+@pytest.mark.parametrize("case,expected", [("valid", "MEASURED_ROOT_MOTION_IMPROVED"),
+                                           ("incomplete_native", "INCOMPLETE"),
+                                           ("failed_native", "REGRESSION_DETECTED")])
+def test_job_bound_outcome_requires_native_readback(tmp_path, case, expected):
+    _parent, child, session, lineage = _job_pair(tmp_path)
+    if case == "incomplete_native":
+        child["generation_hierarchy_status"] = "INCOMPLETE"
+    elif case == "failed_native":
+        child["generation_readback_status"] = "FAIL"
+    result = outcome.compare_jobs(tmp_path, child, session, lineage)
+    assert result["status"] == expected
+    assert result["automatic_retry_allowed"] is False
+    assert result["parent_job_id"] == "a" * 32
+
+
+@pytest.mark.parametrize("case", ["parent_job", "diagnostic_hash", "foreign_file", "child_plan", "same_level"])
+def test_job_bound_comparison_rejects_detached_evidence(tmp_path, case):
+    from pathlib import Path
+
+    parent, child, session, lineage = _job_pair(tmp_path)
+    if case == "parent_job":
+        (tmp_path / "jobs" / ("a" * 32 + ".json")).write_text("{}")
+    elif case == "diagnostic_hash":
+        child["diagnostic_sha256"] = "wrong"
+    elif case == "foreign_file":
+        child["diagnostic_file"] = parent["diagnostic_file"]
+    elif case == "child_plan":
+        (Path(child["candidate_dir"]) / "transfer-plan.json").write_text("{}")
+    else:
+        child["expected_level"] = parent["expected_level"]
+    with pytest.raises(ValueError):
+        outcome.compare_jobs(tmp_path, child, session, lineage)

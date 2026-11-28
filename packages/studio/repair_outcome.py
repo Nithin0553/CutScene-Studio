@@ -6,8 +6,9 @@ import ntpath
 import re
 from pathlib import Path
 
-from packages.studio.repair_candidate import snapshot
-from packages.studio.repair_candidate import write_new as write_new
+from packages.studio.repair_candidate import snapshot, write_new
+
+__all__ = ["compare", "compare_jobs", "write_new"]
 
 EPSILON_CM = 0.01
 MAX_FRAMES = 3000

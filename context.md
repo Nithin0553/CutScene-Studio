@@ -83,6 +83,11 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-28 — Repair outcome lint correction
+
+- Owner reported one PLC0414 diagnostic at 7ebc55d for the redundant write_new self-alias. Replaced it with a normal import and explicit public exports, retaining the write_new API used by the worker and tests. No comparison or execution behavior changed.
+- Rerun preceding Ruff and ten-module regression commands. No new regression results or native acceptance evidence supplied yet. Keep engines/Ollama closed.
+
 ### 2026-11-28 — Repair candidate regression passed; independent before/after motion comparison
 
 - Owner confirmed all checks passed at 39e78bc (exact count not supplied). PR #1 draft; no CI runs.

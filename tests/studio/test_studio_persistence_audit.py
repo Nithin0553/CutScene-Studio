@@ -432,3 +432,37 @@ def test_saved_rig_identity_is_checked_from_native_assets(tmp_path, case, status
     assert result["status"] == status
     assert len(result["rig_identities"]) == 1
     assert result["fidelity_verified"] is False
+
+
+@pytest.mark.parametrize("case,status", [
+    ("valid", "STRUCTURAL_READBACK_PASS_RESTART_UNVERIFIED"),
+    ("wrong_slot", "STRUCTURAL_READBACK_FAIL"),
+    ("unavailable", "STRUCTURAL_READBACK_INCOMPLETE"),
+    ("unbound_receipt", "STRUCTURAL_READBACK_FAIL"),
+])
+def test_assigned_material_slot_is_independently_checked(tmp_path, case, status):
+    from test_source_material_restore import FakeComponent, FakeMaterial
+
+    _root, jobfile, candidate, fake, _assets, actors = fixture(tmp_path)
+    manifest = json.loads((candidate / "automatic-setup.json").read_text())
+    material = {"slot_name": "Body", "target_material": "/Game/Body",
+                "source_material_sha256": "a" * 64}
+    manifest["source_albedo_actor_candidates"] = {"Hero": [material]}
+    _write(candidate / "automatic-setup.json", manifest)
+    job = json.loads(jobfile.read_text())
+    setup_file = Path(job["setup_receipt_file"])
+    setup = json.loads(setup_file.read_text())
+    receipt = dict(material, actor="Hero", status="SOURCE_ALBEDO_ASSIGNED_RENDER_PARITY_UNVERIFIED",
+                   component_class="SkeletalMeshComponent", component_index=0, component_count=1, index=0)
+    if case == "unbound_receipt":
+        receipt["source_material_sha256"] = "b" * 64
+    setup["material_restoration"] = [receipt]
+    _write(setup_file, setup)
+    fake.SkeletalMeshComponent = object()
+    component = FakeComponent(FakeMaterial("/Game/Other.Other" if case == "wrong_slot" else "/Game/Body.Body"))
+    if case != "unavailable":
+        actors[0].get_components_by_class = lambda cls: [component]
+    result = AUDIT.audit(jobfile, candidate / "material-audit.json", unreal_api=fake)
+    assert result["status"] == status
+    assert len(result["material_slot_readback"]) == 1
+    assert result["fidelity_verified"] is False

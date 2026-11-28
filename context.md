@@ -83,6 +83,13 @@ flowchart TD
 - No runtime implementation or real-engine transfer test is implied by architecture approval.
 
 
+### 2026-11-27 — Animation timing regression passed; source-backed albedo identity and native slot verification
+
+- Owner confirmed all checks passed at 61c071b (exact count not supplied). Prior explicit 224 conversion and 252 host/provider counts, Node 23. PR #1 open draft.
+- Existing actor-scoped albedo planner could lose the second texture GUID when identical PNG bytes were deduplicated. Preserve aliases only when canonical path/hash and current bytes agree; retain exact source GUID and .meta hash in material candidate. Reject conflicting same-priority _BaseMap/_MainTex references rather than first-match guessing. Existing byte-level dedup policy retained; differing Unity import settings are not converted or proven equivalent. Changed inspector requires fresh candidates; no old artifacts rewritten.
+- Native material restore now checks the documented Boolean Base Color connection result, immediately observes exact assigned component/slot material path, and logs unavailable native slot probes. Existing nondefault materials remain untouched; no shader graph or visual parity claims. Canonical native restoration helper reload added. Independent persistence audit checks previously assigned material slots against unique actor-scoped manifest candidate and native readback; mismatch FAIL, inaccessible evidence INCOMPLETE. Legacy receipts missing slot identity cannot yield new material-slot PASS. This verifies claimed assignments, not every source material, compiled graph, texture sampling, environment appearance or full scene coverage.
+- Added 11 tests (seven source/material tests, four persistence) and updated legacy static mock to reflect assignment. Tests not run remotely. Run material, automatic asset/setup, persistence, planner-sync and local bridge suites plus Ruff for changed previously-clean modules and restoration helper. Keep engines/Ollama closed. Next environment mesh identity/remaining semantic gaps, then bounded CineTwin repair and full regression.
+
 ### 2026-11-27 — Rig identity regression passed; imported skeletal timing gate
 
 - Owner confirmed all checks passed at 336965f (exact count not supplied). Previous explicit 224 conversion and 252 host/provider counts, Node 23. PR #1 open draft.

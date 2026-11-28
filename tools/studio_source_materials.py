@@ -16,7 +16,7 @@ _TEXTURE = re.compile(
 )
 
 
-def candidates(source_materials, imports, target_folder, digest):
+def candidates(source_materials, imports, target_folder, digest, *, aliases=()):
     """Return (candidates, diagnostic strings); no engine or source writes.
 
     Only renderer-identified Unity .mat files and textures already in the
@@ -27,6 +27,15 @@ def candidates(source_materials, imports, target_folder, digest):
         Path(row["source_file"]).resolve(): row
         for row in imports if row["kind"] == "Texture2D"
     }
+    # Preserve exact source GUIDs even when identical PNG bytes share an import.
+    for alias in aliases:
+        source = Path(alias["source_file"]).resolve()
+        canonical = Path(alias["canonical_source_file"]).resolve()
+        row = texture_imports.get(canonical)
+        if (row is not None and alias["target_asset_path"] == row["target_asset_path"]
+                and alias["source_sha256"] == row["source_sha256"]
+                and source.is_file() and digest(source) == row["source_sha256"]):
+            texture_imports[source] = dict(row, source_file=str(source))
     by_guid = {}
     for png, row in sorted(texture_imports.items()):
         meta = png.with_name(png.name + ".meta")
@@ -34,7 +43,9 @@ def candidates(source_materials, imports, target_folder, digest):
             continue
         match = _GUID.search(meta.read_text(encoding="utf-8-sig", errors="replace"))
         if match:
-            by_guid.setdefault(match.group(1).lower(), []).append(row)
+            by_guid.setdefault(match.group(1).lower(), []).append(
+                dict(row, source_texture_meta_sha256=digest(meta))
+            )
 
     names = {}
     for file in sorted(source_materials):
@@ -51,12 +62,16 @@ def candidates(source_materials, imports, target_folder, digest):
         text = source.read_text(encoding="utf-8-sig", errors="replace")
         matches = _TEXTURE.findall(text)
         # Prefer URP _BaseMap, otherwise built-in Standard _MainTex.
-        chosen = next((guid for key, guid in matches if key == "_BaseMap"), None)
-        if chosen is None:
-            chosen = next((guid for key, guid in matches if key == "_MainTex"), None)
-        if chosen is None:
+        preferred = {guid.lower() for key, guid in matches if key == "_BaseMap"}
+        if not preferred:
+            preferred = {guid.lower() for key, guid in matches if key == "_MainTex"}
+        if not preferred:
             continue
-        textures = by_guid.get(chosen.lower(), [])
+        if len(preferred) != 1:
+            diagnostics.append("Ambiguous Unity albedo texture reference: " + name)
+            continue
+        chosen = next(iter(preferred))
+        textures = by_guid.get(chosen, [])
         if len(textures) != 1:
             diagnostics.append("Unity material " + name +
                                " has no unique imported albedo texture GUID.")
@@ -72,6 +87,8 @@ def candidates(source_materials, imports, target_folder, digest):
             "source_material_sha256": digest(source),
             "source_texture": textures[0]["source_file"],
             "source_texture_sha256": textures[0]["source_sha256"],
+            "source_texture_guid": chosen,
+            "source_texture_meta_sha256": textures[0]["source_texture_meta_sha256"],
             "target_texture": textures[0]["target_asset_path"],
             "target_material": target_folder + "/Materials/CSAI_" +
                                sanitized + "_" + digest(source)[:8],

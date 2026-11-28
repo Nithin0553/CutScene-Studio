@@ -421,12 +421,12 @@ def inspect(csir_path, mapping_path, plan_path, source_project, source_scope, ta
     # Never use it to assign materials to a particular actor: two unrelated
     # imported meshes may both have a "Body" slot but different source .mat.
     material_candidates, _global_diagnostics = studio_source_materials.candidates(
-        material_files, imports, target_folder, digest
+        material_files, imports, target_folder, digest, aliases=deduplicated_textures
     )
     actor_material_candidates = {}
     for actor_name, files_for_actor in sorted(material_files_by_actor.items()):
         candidates_for_actor, diagnostics = studio_source_materials.candidates(
-            files_for_actor, imports, target_folder, digest
+            files_for_actor, imports, target_folder, digest, aliases=deduplicated_textures
         )
         actor_material_candidates[actor_name] = candidates_for_actor
         warnings.extend(actor_name + ': ' + message for message in diagnostics)

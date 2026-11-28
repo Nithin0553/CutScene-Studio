@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "integrations" / "unreal"))
 import studio_auto_assets
@@ -44,7 +46,6 @@ def test_source_guid_material_is_planned_and_tamper_detected(tmp_path):
     manifest.write_text(json.dumps(plan))
     assert studio_auto_assets.verify(manifest, *docs) == plan
     material.write_text(material.read_text() + "\n# source edited")
-    import pytest
     with pytest.raises(studio_auto_assets.AutoAssetError, match="changed"):
         studio_auto_assets.verify(manifest, *docs)
 
@@ -170,7 +171,7 @@ def test_static_mesh_source_material_matches_unreal_static_materials():
                 return StaticMesh()
             raise AttributeError(name)
         def get_material(self, index):
-            return FakeMaterial("/Engine/EngineMaterials/WorldGridMaterial")
+            return self.assigned[-1][1] if self.assigned else FakeMaterial("/Engine/EngineMaterials/WorldGridMaterial")
         def set_material(self, index, material):
             self.assigned.append((index, material))
 
@@ -275,3 +276,86 @@ def test_native_setup_receives_only_the_matching_actor_source_material(tmp_path,
         assert paths == [sources[expected_labels[label]]]
     assert {x["actor"] for x in result["material_restoration"]} == set(sources)
     assert result["fidelity_verified"] is False
+
+
+def test_deduplicated_texture_retains_its_own_source_guid(tmp_path):
+    project, docs, _stage, _sources = _two_actors_with_same_slot(tmp_path)
+    source = json.loads(docs[0].read_text())
+    records = [e["metadata"]["source_material_assets"][0] for e in source["entities"][:2]]
+    first, second = [project / row["albedo_texture_asset_path"] for row in records]
+    second.write_bytes(first.read_bytes())
+    stage = studio_auto_assets.inspect(
+        *docs, project, "Assets/Benchmark002", "/Game/CutSceneAI/AutoTransfer/T_ALIAS"
+    )
+    assert stage["ready"]
+    assert len(stage["deduplicated_textures"]) == 1
+    rows = [stage["source_albedo_actor_candidates"][e["name"]][0] for e in source["entities"][:2]]
+    assert rows[0]["target_texture"] == rows[1]["target_texture"]
+    assert rows[0]["source_texture_guid"] != rows[1]["source_texture_guid"]
+    assert rows[1]["source_texture"] == str(second.resolve())
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(stage))
+    meta = second.with_name(second.name + ".meta")
+    meta.write_text(meta.read_text() + "textureType: 1\n")
+    with pytest.raises(studio_auto_assets.AutoAssetError, match="changed"):
+        studio_auto_assets.verify(manifest, *docs)
+
+
+def test_conflicting_albedo_references_are_not_selected_by_order(tmp_path):
+    project, docs, _stage, _sources = _two_actors_with_same_slot(tmp_path)
+    src = json.loads(docs[0].read_text())
+    record = src["entities"][0]["metadata"]["source_material_assets"][0]
+    material = project / record["asset_path"]
+    material.write_text(material.read_text() +
+                        "    - _BaseMap:\n        m_Texture: {fileID: 2800000, guid: ffffffffffffffffffffffffffffffff, type: 3}\n")
+    result = studio_auto_assets.inspect(
+        *docs, project, "Assets/Benchmark002", "/Game/CutSceneAI/AutoTransfer/T_CONFLICT"
+    )
+    assert result["source_albedo_actor_candidates"][src["entities"][0]["name"]] == []
+    assert any("Ambiguous Unity albedo texture reference" in warning for warning in result["warnings"])
+
+
+def test_native_noop_material_assignment_fails_readback():
+    component = FakeComponent(FakeMaterial("/Engine/EngineMaterials/WorldGridMaterial"))
+    api = SimpleNamespace(SkeletalMeshComponent="SkeletalMeshComponent")
+    actor = SimpleNamespace(get_components_by_class=lambda cls: [component])
+    candidate = {"slot_name": "Body", "target_material": "/Game/Body",
+                 "source_material_sha256": "a" * 64}
+    with pytest.raises(RuntimeError, match="assignment readback"):
+        studio_material_restore.restore(api, actor, [candidate],
+                                        existing_assets={"/Game/Body": FakeMaterial("/Game/Body.Body")})
+
+
+def test_failed_native_material_connection_is_not_reported_as_restored():
+    component = FakeComponent(FakeMaterial("/Engine/EngineMaterials/WorldGridMaterial"))
+    actor = SimpleNamespace(get_components_by_class=lambda cls: [component])
+    texture = SimpleNamespace(get_class=lambda: SimpleNamespace(get_name=lambda: "Texture2D"))
+    expression = SimpleNamespace(set_editor_property=lambda *args: None)
+    api = SimpleNamespace(
+        SkeletalMeshComponent="SkeletalMeshComponent",
+        EditorAssetLibrary=SimpleNamespace(does_asset_exist=lambda path: False),
+        load_asset=lambda path: texture,
+        MaterialFactoryNew=lambda: object(), Material=object(), MaterialExpressionTextureSample=object(),
+        AssetToolsHelpers=SimpleNamespace(get_asset_tools=lambda:
+            SimpleNamespace(create_asset=lambda *args: FakeMaterial("/Game/Body"))),
+        MaterialEditingLibrary=SimpleNamespace(create_material_expression=lambda *args: expression,
+                                             connect_material_property=lambda *args: False),
+        MaterialProperty=SimpleNamespace(MP_BASE_COLOR=object()),
+    )
+    with pytest.raises(RuntimeError, match="Base Color connection failed"):
+        studio_material_restore.restore(api, actor, [{"slot_name": "Body", "target_material": "/Game/Body",
+                                                    "target_texture": "/Game/Texture",
+                                                    "source_material_sha256": "a" * 64}])
+    assert component.assignments == []
+
+
+@pytest.mark.parametrize("actual,status", [("/Game/Body.Body", "PASS"),
+                                            ("/Game/Other.Other", "FAIL"),
+                                            (None, "FAIL")])
+def test_independent_material_slot_identity(actual, status):
+    component = FakeComponent(FakeMaterial(actual) if actual else None)
+    api = SimpleNamespace(SkeletalMeshComponent="SkeletalMeshComponent")
+    actor = SimpleNamespace(get_components_by_class=lambda cls: [component])
+    entry = {"slot_name": "Body", "index": 0, "component_class": "SkeletalMeshComponent",
+             "component_index": 0, "component_count": 1, "target_material": "/Game/Body"}
+    assert studio_material_restore.observe_slot(api, actor, entry)["status"] == status
